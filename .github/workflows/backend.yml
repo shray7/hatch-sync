@@ -1,0 +1,70 @@
+# Build the FastAPI backend image, push to Azure Container Registry, and deploy to Azure Container Apps.
+name: Backend (Azure)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "Dockerfile"
+      - "requirements.txt"
+      - ".github/workflows/backend.yml"
+
+env:
+  AZURE_RESOURCE_GROUP: hatchsync
+  AZURE_CONTAINERAPPS_ENV: hatchsync-env
+  AZURE_CONTAINERAPP_NAME: hatch-sync-api
+  ACR_NAME: hatchsyncacr
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create service account file for image
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" > service_account.json
+          else
+            echo '{}' > service_account.json
+          fi
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and push image to ACR
+        run: |
+          az acr build \
+            --registry ${{ env.ACR_NAME }} \
+            --image hatch-sync-api:${{ github.sha }} \
+            --image hatch-sync-api:latest \
+            .
+
+      - name: Deploy to Container Apps
+        run: |
+          az containerapp update \
+            --name ${{ env.AZURE_CONTAINERAPP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/hatch-sync-api:${{ github.sha }}
+
+      - name: Get API URL and smoke test
+        run: |
+          FQDN=$(az containerapp show \
+            --name ${{ env.AZURE_CONTAINERAPP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "API URL: https://${FQDN}"
+          echo "API_URL=https://${FQDN}" >> $GITHUB_ENV
+          # Allow a short time for the new revision to be serving
+          sleep 15
+          curl -sf "https://${FQDN}/health" | jq .
