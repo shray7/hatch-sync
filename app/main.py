@@ -52,9 +52,18 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+# Explicit origins so CORS works with credentials (browsers reject "*" when credentials are true).
+# Set CORS_ORIGINS (comma-separated) to add more; default includes GitHub Pages and local dev.
+_default_origins = [
+    "https://shray7.github.io",
+    "http://localhost:5173",
+    "http://localhost:8000",
+]
+_cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
+_cors_origins = [o.strip() for o in _cors_origins.split(",") if o.strip()] if _cors_origins else _default_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
