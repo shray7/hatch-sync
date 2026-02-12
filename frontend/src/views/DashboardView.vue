@@ -10,7 +10,7 @@
     </section>
 
     <section
-      v-if="loaded"
+      v-if="loaded && raw"
       class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
     >
       <StatCard
@@ -36,7 +36,7 @@
     </section>
 
     <section
-      v-if="loaded"
+      v-if="loaded && raw"
       class="grid grid-cols-1 gap-4 md:grid-cols-2"
     >
       <TimeSeriesChart
@@ -51,7 +51,7 @@
       />
     </section>
 
-    <section v-if="loaded" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+    <section v-if="loaded && raw" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <TimeSeriesChart
         title="Total sleep per day (hours)"
         :labels="sleepPerDay.labels"
@@ -64,8 +64,13 @@
       />
     </section>
 
-    <section v-if="!loaded" class="flex items-center justify-center py-16">
-      <p class="text-sm text-slate-400">Loading seed data…</p>
+    <section v-if="dataError" class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70 p-4">
+      <p class="text-sm text-rose-300">Dashboard data: {{ dataError }}</p>
+      <p class="mt-2 text-xs text-slate-400">Check that the API is reachable and HATCH_EMAIL/HATCH_PASSWORD are set.</p>
+    </section>
+
+    <section v-else-if="!loaded" class="flex items-center justify-center py-16">
+      <p class="text-sm text-slate-400">Loading live data…</p>
     </section>
 
     <section class="mt-6">
@@ -152,6 +157,7 @@ import TimeSeriesChart from "../components/TimeSeriesChart.vue";
 
 const raw = ref(null);
 const loaded = ref(false);
+const dataError = ref(null);
 const photos = ref([]);
 const photosLoaded = ref(false);
 const photosError = ref(null);
@@ -370,9 +376,15 @@ function formatPhotoDate(dateStr) {
 }
 
 onMounted(async () => {
-  const data = await fetchGrowData();
-  raw.value = data;
-  loaded.value = true;
+  try {
+    const data = await fetchGrowData();
+    raw.value = data;
+  } catch (e) {
+    const detail = e.response?.data?.detail ?? e.message;
+    dataError.value = typeof detail === "string" ? detail : "Failed to load data.";
+  } finally {
+    loaded.value = true;
+  }
 
   try {
     const photoData = await fetchPhotos();

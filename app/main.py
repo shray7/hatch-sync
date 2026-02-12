@@ -11,9 +11,11 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.cache import (
+    get_cached_grow_data,
     get_cached_login,
     get_cached_photos,
     redis_health,
+    set_cached_grow_data,
     set_cached_login,
     set_cached_photos,
 )
@@ -24,8 +26,14 @@ from app.hatch_service import (
     set_audio_track,
     set_volume,
 )
-from app.hatch_grow_service import fetch_photos, login as hatch_grow_login
-from app.seed_data import get_seed_grow_data
+from app.hatch_grow_service import (
+    fetch_diapers,
+    fetch_feedings,
+    fetch_photos,
+    fetch_sleep,
+    fetch_weight,
+    login as hatch_grow_login,
+)
 from app.sync import run_sync
 
 
@@ -79,10 +87,60 @@ async def health():
 
 @app.get("/grow/data")
 async def grow_data():
-    """Return seeded Hatch Grow-style data (babies, feedings, diapers, sleeps, weights)."""
-    # For now this always returns local seed data. Later this can switch to live Hatch API
-    # via app.hatch_grow_service while keeping the same response shape.
-    return get_seed_grow_data()
+    """Return live Hatch Grow data (babies, feedings, diapers, sleeps, weights). Uses cache when available."""
+    email = os.environ.get("HATCH_EMAIL")
+    password = os.environ.get("HATCH_PASSWORD")
+    if not email or not password:
+        raise HTTPException(status_code=503, detail="HATCH_EMAIL and HATCH_PASSWORD required")
+    async with aiohttp.ClientSession() as session:
+        login_data = await get_cached_login()
+        if not login_data:
+            try:
+                login_data = await hatch_grow_login(session, email, password)
+            except Exception as e:
+                raise HTTPException(status_code=503, detail=f"Login failed: {e}")
+            await set_cached_login(login_data)
+        babies = login_data.get("payload", {}).get("babies", [])
+        if not babies:
+            return {"babies": [], "feedings": [], "diapers": [], "sleeps": [], "weights": []}
+        baby_id = babies[0]["id"]
+        token = login_data["token"]
+        cached = await get_cached_grow_data(baby_id)
+        if cached and isinstance(cached, dict):
+            return {
+                "babies": babies,
+                "feedings": cached.get("feedings") or [],
+                "diapers": cached.get("diapers") or [],
+                "sleeps": cached.get("sleeps") or [],
+                "weights": cached.get("weights") or [],
+            }
+        try:
+            diapers = await fetch_diapers(session, token, baby_id)
+        except Exception:
+            diapers = []
+        try:
+            feedings = await fetch_feedings(session, token, baby_id)
+        except Exception:
+            feedings = []
+        try:
+            sleeps = await fetch_sleep(session, token, baby_id)
+        except Exception:
+            sleeps = []
+        try:
+            weights = await fetch_weight(session, token, baby_id)
+        except Exception:
+            weights = []
+        await set_cached_grow_data(
+            baby_id,
+            {"diapers": diapers, "feedings": feedings, "sleeps": sleeps, "weights": weights},
+        )
+        return {
+            "babies": babies,
+            "feedings": feedings,
+            "diapers": diapers,
+            "sleeps": sleeps,
+            "weights": weights,
+        }
 
 
 @app.get("/grow/photos")
