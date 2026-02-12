@@ -79,6 +79,12 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+async def root():
+    """Root path for probes and discovery; use /health for health checks."""
+    return {"app": "hatch-sync", "health": "/health"}
+
+
 @app.get("/health")
 async def health():
     """Health check, including Redis cache status and whether Hatch env vars are set (no values exposed)."""

@@ -7,10 +7,14 @@ the existing behavior.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 from typing import Any, Optional
+
+# Timeout for Redis ping in health check so /health never hangs
+REDIS_PING_TIMEOUT_SECONDS = 2.0
 
 logger = logging.getLogger(__name__)
 
@@ -170,13 +174,16 @@ async def redis_health() -> str:
     Returns:
         - "disabled" if Redis is not configured or client unavailable.
         - "ok" if a PING succeeds.
-        - "unavailable" if a PING fails.
+        - "unavailable" if a PING fails or times out (so /health never hangs).
     """
     if not _cache_enabled or _redis is None:
         return "disabled"
     try:
-        await _redis.ping()
+        await asyncio.wait_for(_redis.ping(), timeout=REDIS_PING_TIMEOUT_SECONDS)
         return "ok"
+    except asyncio.TimeoutError:
+        logger.debug("Redis PING timed out")
+        return "unavailable"
     except Exception:
         return "unavailable"
 

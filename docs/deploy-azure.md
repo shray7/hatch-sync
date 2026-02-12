@@ -142,3 +142,15 @@ The app’s `app/cache.py` uses `REDIS_URL` as-is; the `redis` client supports `
 - **403 / ACR pull**: The API app’s managed identity has **AcrPull** on the registry; if you recreated the app, run the role assignment again (see end of `scripts/azure-setup.sh`).
 - **Redis connection refused**: Ensure **hatch-sync-redis** is running and that `REDIS_URL` uses the internal hostname (e.g. `*.internal.*`). For Azure Cache for Redis, use the correct port (6380) and `rediss://` with SSL.
 - **CORS**: The FastAPI app allows all origins; if you restrict them later, add your GitHub Pages origin (e.g. `https://<owner>.github.io`).
+
+### 4.1 API not reachable (timeout / connection refused)
+
+1. **Verify from your machine** (with Azure CLI and `az login`):
+   ```bash
+   ./scripts/verify_azure_api_reachable.sh
+   ```
+   This prints the app’s FQDN, ingress config, active revision/replicas, and tries `GET /health`. If the HTTP request fails, the script suggests next steps.
+
+2. **In Azure Portal**: **Container Apps** → **hatch-sync-api** → **Revisions** — confirm an active revision has **Replicas** &gt; 0. If replicas are 0 or the revision is not receiving traffic, check **Log stream** (or **Monitoring** → **Logs**) for startup or runtime errors (e.g. missing env vars, Redis unreachable, crash on import).
+
+3. **First request after idle** can take 1–2 minutes (cold start). Retry after a short wait.
