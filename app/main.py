@@ -2,6 +2,7 @@
 hatch-sync: FastAPI API for Hatch Rest devices using the unofficial hatch-rest-api library.
 Also syncs Hatch Grow data (diapers, feedings, sleep, weight) to Google Calendar.
 """
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -80,9 +81,16 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    """Health check, including Redis cache status if configured."""
+    """Health check, including Redis cache status and whether Hatch env vars are set (no values exposed)."""
     redis_status = await redis_health()
-    return {"status": "ok", "redis": redis_status}
+    email = os.environ.get("HATCH_EMAIL", "").strip()
+    password = os.environ.get("HATCH_PASSWORD", "").strip()
+    hatch_configured = bool(email and password)
+    return {
+        "status": "ok",
+        "redis": redis_status,
+        "hatch_configured": hatch_configured,
+    }
 
 
 @app.get("/grow/data")
@@ -114,22 +122,18 @@ async def grow_data():
                 "sleeps": cached.get("sleeps") or [],
                 "weights": cached.get("weights") or [],
             }
-        try:
-            diapers = await fetch_diapers(session, token, baby_id)
-        except Exception:
-            diapers = []
-        try:
-            feedings = await fetch_feedings(session, token, baby_id)
-        except Exception:
-            feedings = []
-        try:
-            sleeps = await fetch_sleep(session, token, baby_id)
-        except Exception:
-            sleeps = []
-        try:
-            weights = await fetch_weight(session, token, baby_id)
-        except Exception:
-            weights = []
+        async def safe_fetch(coro, default):
+            try:
+                return await coro
+            except Exception:
+                return default
+
+        diapers, feedings, sleeps, weights = await asyncio.gather(
+            safe_fetch(fetch_diapers(session, token, baby_id), []),
+            safe_fetch(fetch_feedings(session, token, baby_id), []),
+            safe_fetch(fetch_sleep(session, token, baby_id), []),
+            safe_fetch(fetch_weight(session, token, baby_id), []),
+        )
         await set_cached_grow_data(
             baby_id,
             {"diapers": diapers, "feedings": feedings, "sleeps": sleeps, "weights": weights},

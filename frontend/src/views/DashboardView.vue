@@ -66,7 +66,7 @@
 
     <section v-if="dataError" class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70 p-4">
       <p class="text-sm text-rose-300">Dashboard data: {{ dataError }}</p>
-      <p class="mt-2 text-xs text-slate-400">Check that the API is reachable and HATCH_EMAIL/HATCH_PASSWORD are set.</p>
+      <p class="mt-2 text-xs text-slate-400">Check that the API is reachable and HATCH_EMAIL/HATCH_PASSWORD are set. The first load can take up to a minute if the API was idle.</p>
     </section>
 
     <section v-else-if="!loaded" class="flex items-center justify-center py-16">
