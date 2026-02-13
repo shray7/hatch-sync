@@ -13,8 +13,8 @@ import logging
 import os
 from typing import Any, Optional
 
-# Timeout for Redis ping in health check so /health never hangs
-REDIS_PING_TIMEOUT_SECONDS = 2.0
+# Timeout for Redis operations so request handlers never hang when Redis is unreachable
+REDIS_OP_TIMEOUT_SECONDS = 3.0
 
 logger = logging.getLogger(__name__)
 
@@ -52,22 +52,27 @@ else:
 
 
 async def _get(key: str) -> Optional[str]:
-    """Low-level GET. Returns None on any error or when cache is disabled."""
+    """Low-level GET. Returns None on any error, timeout, or when cache is disabled."""
     if not _cache_enabled or _redis is None:
         return None
     try:
-        return await _redis.get(key)
+        return await asyncio.wait_for(_redis.get(key), timeout=REDIS_OP_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.debug("Redis GET %s timed out", key)
+        return None
     except Exception as exc:  # pragma: no cover - network / runtime issues
         logger.debug("Redis GET %s failed: %s", key, exc)
         return None
 
 
 async def _set(key: str, value: str, ttl_seconds: int) -> None:
-    """Low-level SET with TTL. No-ops on error or when cache is disabled."""
+    """Low-level SET with TTL. No-ops on error, timeout, or when cache is disabled."""
     if not _cache_enabled or _redis is None:
         return
     try:
-        await _redis.set(key, value, ex=ttl_seconds)
+        await asyncio.wait_for(_redis.set(key, value, ex=ttl_seconds), timeout=REDIS_OP_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.debug("Redis SET %s timed out", key)
     except Exception as exc:  # pragma: no cover - network / runtime issues
         logger.debug("Redis SET %s failed: %s", key, exc)
 
@@ -179,7 +184,7 @@ async def redis_health() -> str:
     if not _cache_enabled or _redis is None:
         return "disabled"
     try:
-        await asyncio.wait_for(_redis.ping(), timeout=REDIS_PING_TIMEOUT_SECONDS)
+        await asyncio.wait_for(_redis.ping(), timeout=REDIS_OP_TIMEOUT_SECONDS)
         return "ok"
     except asyncio.TimeoutError:
         logger.debug("Redis PING timed out")
