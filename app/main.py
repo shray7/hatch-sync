@@ -37,6 +37,9 @@ from app.hatch_grow_service import (
 )
 from app.sync import run_sync
 
+# Timeout for outbound requests to Hatch API so /grow/data and /grow/photos don't hang
+HATCH_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=50, connect=15)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -106,51 +109,54 @@ async def grow_data():
     password = os.environ.get("HATCH_PASSWORD")
     if not email or not password:
         raise HTTPException(status_code=503, detail="HATCH_EMAIL and HATCH_PASSWORD required")
-    async with aiohttp.ClientSession() as session:
-        login_data = await get_cached_login()
-        if not login_data:
-            try:
-                login_data = await hatch_grow_login(session, email, password)
-            except Exception as e:
-                raise HTTPException(status_code=503, detail=f"Login failed: {e}")
-            await set_cached_login(login_data)
-        babies = login_data.get("payload", {}).get("babies", [])
-        if not babies:
-            return {"babies": [], "feedings": [], "diapers": [], "sleeps": [], "weights": []}
-        baby_id = babies[0]["id"]
-        token = login_data["token"]
-        cached = await get_cached_grow_data(baby_id)
-        if cached and isinstance(cached, dict):
+    try:
+        async with aiohttp.ClientSession(timeout=HATCH_HTTP_TIMEOUT) as session:
+            login_data = await get_cached_login()
+            if not login_data:
+                try:
+                    login_data = await hatch_grow_login(session, email, password)
+                except Exception as e:
+                    raise HTTPException(status_code=503, detail=f"Login failed: {e}")
+                await set_cached_login(login_data)
+            babies = login_data.get("payload", {}).get("babies", [])
+            if not babies:
+                return {"babies": [], "feedings": [], "diapers": [], "sleeps": [], "weights": []}
+            baby_id = babies[0]["id"]
+            token = login_data["token"]
+            cached = await get_cached_grow_data(baby_id)
+            if cached and isinstance(cached, dict):
+                return {
+                    "babies": babies,
+                    "feedings": cached.get("feedings") or [],
+                    "diapers": cached.get("diapers") or [],
+                    "sleeps": cached.get("sleeps") or [],
+                    "weights": cached.get("weights") or [],
+                }
+            async def safe_fetch(coro, default):
+                try:
+                    return await coro
+                except Exception:
+                    return default
+
+            diapers, feedings, sleeps, weights = await asyncio.gather(
+                safe_fetch(fetch_diapers(session, token, baby_id), []),
+                safe_fetch(fetch_feedings(session, token, baby_id), []),
+                safe_fetch(fetch_sleep(session, token, baby_id), []),
+                safe_fetch(fetch_weight(session, token, baby_id), []),
+            )
+            await set_cached_grow_data(
+                baby_id,
+                {"diapers": diapers, "feedings": feedings, "sleeps": sleeps, "weights": weights},
+            )
             return {
                 "babies": babies,
-                "feedings": cached.get("feedings") or [],
-                "diapers": cached.get("diapers") or [],
-                "sleeps": cached.get("sleeps") or [],
-                "weights": cached.get("weights") or [],
+                "feedings": feedings,
+                "diapers": diapers,
+                "sleeps": sleeps,
+                "weights": weights,
             }
-        async def safe_fetch(coro, default):
-            try:
-                return await coro
-            except Exception:
-                return default
-
-        diapers, feedings, sleeps, weights = await asyncio.gather(
-            safe_fetch(fetch_diapers(session, token, baby_id), []),
-            safe_fetch(fetch_feedings(session, token, baby_id), []),
-            safe_fetch(fetch_sleep(session, token, baby_id), []),
-            safe_fetch(fetch_weight(session, token, baby_id), []),
-        )
-        await set_cached_grow_data(
-            baby_id,
-            {"diapers": diapers, "feedings": feedings, "sleeps": sleeps, "weights": weights},
-        )
-        return {
-            "babies": babies,
-            "feedings": feedings,
-            "diapers": diapers,
-            "sleeps": sleeps,
-            "weights": weights,
-        }
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Hatch API timed out; try again in a moment.")
 
 
 @app.get("/grow/photos")
@@ -160,29 +166,32 @@ async def grow_photos():
     password = os.environ.get("HATCH_PASSWORD")
     if not email or not password:
         raise HTTPException(status_code=503, detail="HATCH_EMAIL and HATCH_PASSWORD required")
-    async with aiohttp.ClientSession() as session:
-        # Try cached login (token + babies) first
-        login_data = await get_cached_login()
-        if not login_data:
-            try:
-                login_data = await hatch_grow_login(session, email, password)
-            except Exception as e:
-                raise HTTPException(status_code=503, detail=f"Login failed: {e}")
-            await set_cached_login(login_data)
+    try:
+        async with aiohttp.ClientSession(timeout=HATCH_HTTP_TIMEOUT) as session:
+            # Try cached login (token + babies) first
+            login_data = await get_cached_login()
+            if not login_data:
+                try:
+                    login_data = await hatch_grow_login(session, email, password)
+                except Exception as e:
+                    raise HTTPException(status_code=503, detail=f"Login failed: {e}")
+                await set_cached_login(login_data)
 
-        token = login_data["token"]
-        babies = login_data.get("payload", {}).get("babies", [])
-        if not babies:
-            return {"photos": []}
-        baby_id = babies[0]["id"]
-        # Try cached photos for this baby
-        cached_photos = await get_cached_photos(baby_id)
-        if cached_photos is not None:
-            return {"photos": cached_photos}
+            token = login_data["token"]
+            babies = login_data.get("payload", {}).get("babies", [])
+            if not babies:
+                return {"photos": []}
+            baby_id = babies[0]["id"]
+            # Try cached photos for this baby
+            cached_photos = await get_cached_photos(baby_id)
+            if cached_photos is not None:
+                return {"photos": cached_photos}
 
-        photos = await fetch_photos(session, token, baby_id)
-        await set_cached_photos(baby_id, photos)
-        return {"photos": photos}
+            photos = await fetch_photos(session, token, baby_id)
+            await set_cached_photos(baby_id, photos)
+            return {"photos": photos}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Hatch API timed out; try again in a moment.")
 
 
 @app.post("/sync")

@@ -154,3 +154,11 @@ The app’s `app/cache.py` uses `REDIS_URL` as-is; the `redis` client supports `
 2. **In Azure Portal**: **Container Apps** → **hatch-sync-api** → **Revisions** — confirm an active revision has **Replicas** &gt; 0. If replicas are 0 or the revision is not receiving traffic, check **Log stream** (or **Monitoring** → **Logs**) for startup or runtime errors (e.g. missing env vars, Redis unreachable, crash on import).
 
 3. **First request after idle** can take 1–2 minutes (cold start). Retry after a short wait.
+
+### 4.2 Redis unavailable (health shows `"redis": "unavailable"`)
+
+The API works without Redis (cache is skipped; every request hits the Hatch API). To fix Redis:
+
+1. **Check the Redis app is running**: In Azure Portal → **Container Apps** → **hatch-sync-redis** → **Revisions**. Ensure an active revision has **Replicas** ≥ 1. If it’s scaled to 0, scale up or restart the app.
+
+2. **Confirm REDIS_URL on the API**: The API app must have env var `REDIS_URL=secretref:redis-url`, and the secret `redis-url` must be set to the internal URL (e.g. `redis://hatch-sync-redis.internal.<your-env-domain>:6379/0`). If you only ran `azure-set-secrets.sh` and never ran `azure-setup.sh`, the API was created with `redis-url` in setup; if you later ran `az containerapp secret set` with only Hatch/Google secrets, some CLI versions replace all secrets and can remove `redis-url`. Re-add the secret and env var if needed (see setup script for the exact REDIS_URL format).
