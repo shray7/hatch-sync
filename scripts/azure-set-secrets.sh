@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Set Hatch and Google Calendar secrets on the hatch-sync-api Container App.
+# Set Hatch, Google Calendar, and Redis secrets on the hatch-sync-api Container App.
 # Reads values from environment variables so you don't put secrets in the shell history.
+# Redis URL is computed from the Container Apps environment (internal hostname).
 #
 # Prerequisites: Azure CLI installed and logged in (az login).
 # Usage:
@@ -12,6 +13,8 @@ set -euo pipefail
 
 RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-hatchsync}"
 APP_NAME="${AZURE_CONTAINERAPP_NAME:-hatch-sync-api}"
+ACA_ENV_NAME="${AZURE_CONTAINERAPPS_ENV:-hatchsync-env}"
+REDIS_APP_NAME="${AZURE_REDIS_APP_NAME:-hatch-sync-redis}"
 
 missing=()
 [ -z "${HATCH_EMAIL:-}" ] && missing+=(HATCH_EMAIL)
@@ -24,12 +27,21 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
+echo "Getting Redis URL from Container Apps environment..."
+ENV_DEFAULT_DOMAIN=$(az containerapp env show \
+  --name "$ACA_ENV_NAME" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query properties.defaultDomain -o tsv)
+REDIS_URL="redis://${REDIS_APP_NAME}.internal.${ENV_DEFAULT_DOMAIN}:6379/0"
+echo "Redis URL: $REDIS_URL"
+
 echo "Setting secrets on Container App '$APP_NAME' in resource group '$RESOURCE_GROUP'..."
 
 az containerapp secret set \
   --name "$APP_NAME" \
   --resource-group "$RESOURCE_GROUP" \
   --secrets \
+    redis-url="$REDIS_URL" \
     hatch-email="$HATCH_EMAIL" \
     hatch-password="$HATCH_PASSWORD" \
     google-calendar-share-email="$GOOGLE_CALENDAR_SHARE_EMAIL"

@@ -117,7 +117,7 @@ async def grow_data():
                     login_data = await hatch_grow_login(session, email, password)
                 except Exception as e:
                     raise HTTPException(status_code=503, detail=f"Login failed: {e}")
-                await set_cached_login(login_data)
+                asyncio.create_task(set_cached_login(login_data))  # don't block response on cache write
             babies = login_data.get("payload", {}).get("babies", [])
             if not babies:
                 return {"babies": [], "feedings": [], "diapers": [], "sleeps": [], "weights": []}
@@ -144,10 +144,12 @@ async def grow_data():
                 safe_fetch(fetch_sleep(session, token, baby_id), []),
                 safe_fetch(fetch_weight(session, token, baby_id), []),
             )
-            await set_cached_grow_data(
-                baby_id,
-                {"diapers": diapers, "feedings": feedings, "sleeps": sleeps, "weights": weights},
-            )
+            asyncio.create_task(
+                set_cached_grow_data(
+                    baby_id,
+                    {"diapers": diapers, "feedings": feedings, "sleeps": sleeps, "weights": weights},
+                )
+            )  # don't block response on cache write
             return {
                 "babies": babies,
                 "feedings": feedings,
@@ -175,7 +177,7 @@ async def grow_photos():
                     login_data = await hatch_grow_login(session, email, password)
                 except Exception as e:
                     raise HTTPException(status_code=503, detail=f"Login failed: {e}")
-                await set_cached_login(login_data)
+                asyncio.create_task(set_cached_login(login_data))  # don't block response on cache write
 
             token = login_data["token"]
             babies = login_data.get("payload", {}).get("babies", [])
@@ -188,7 +190,7 @@ async def grow_photos():
                 return {"photos": cached_photos}
 
             photos = await fetch_photos(session, token, baby_id)
-            await set_cached_photos(baby_id, photos)
+            asyncio.create_task(set_cached_photos(baby_id, photos))  # don't block response on cache write
             return {"photos": photos}
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Hatch API timed out; try again in a moment.")

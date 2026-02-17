@@ -159,6 +159,11 @@ The app’s `app/cache.py` uses `REDIS_URL` as-is; the `redis` client supports `
 
 The API works without Redis (cache is skipped; every request hits the Hatch API). To fix Redis:
 
-1. **Check the Redis app is running**: In Azure Portal → **Container Apps** → **hatch-sync-redis** → **Revisions**. Ensure an active revision has **Replicas** ≥ 1. If it’s scaled to 0, scale up or restart the app.
+1. **Run the fix script** (with Azure CLI and `az login`):
+   ```bash
+   HATCH_EMAIL=your@email.com HATCH_PASSWORD=secret GOOGLE_CALENDAR_SHARE_EMAIL=you@gmail.com \
+     ./scripts/azure-fix-redis.sh
+   ```
+   This ensures the **hatch-sync-redis** Container App is running (scales to 1 replica if needed) and re-runs **azure-set-secrets.sh**, which now **includes the Redis URL** (computed from your Container Apps environment). That restores the `redis-url` secret on the API app so it can connect to Redis.
 
-2. **Confirm REDIS_URL on the API**: The API app must have env var `REDIS_URL=secretref:redis-url`, and the secret `redis-url` must be set to the internal URL (e.g. `redis://hatch-sync-redis.internal.<your-env-domain>:6379/0`). If you only ran `azure-set-secrets.sh` and never ran `azure-setup.sh`, the API was created with `redis-url` in setup; if you later ran `az containerapp secret set` with only Hatch/Google secrets, some CLI versions replace all secrets and can remove `redis-url`. Re-add the secret and env var if needed (see setup script for the exact REDIS_URL format).
+2. **If you only want to scale Redis** (you already re-ran set-secrets): `./scripts/azure-fix-redis.sh --check-only` to scale the Redis app; then re-run set-secrets with your env vars to add `redis-url` if it was missing.
