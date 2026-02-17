@@ -179,19 +179,23 @@ function hoursBetween(startStr, endStr) {
   return (end - start) / (1000 * 60 * 60);
 }
 
-const todayKey = computed(() => {
-  const now = new Date();
-  return now.toISOString().slice(0, 10);
-});
+// Use local date so "today" and per-day stats match the user's timezone (and Hatch's local-time dates)
+function localDateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+const todayKey = computed(() => localDateKey(new Date()));
 
 const lastNDaysKeys = (n) => {
   const keys = [];
   const now = new Date();
   for (let i = 0; i < n; i++) {
-    const d = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i)
-    );
-    keys.push(d.toISOString().slice(0, 10));
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    keys.push(localDateKey(d));
   }
   return keys.reverse();
 };
