@@ -4,6 +4,7 @@ Uses data.hatchbaby.com; same credentials as Hatch Rest.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import aiohttp
@@ -15,9 +16,19 @@ async def login(session: aiohttp.ClientSession, email: str, password: str) -> di
     """Login and return the full response (token, payload with babies, etc.)."""
     url = f"{API_URL}/public/v1/login"
     async with session.post(url, json={"email": email, "password": password}) as resp:
-        data = await resp.json()
+        if resp.status == 429:
+            raise RuntimeError("Hatch rate limit (429); try again in a few minutes.")
+        text = await resp.text()
+        if "application/json" not in (resp.content_type or ""):
+            raise RuntimeError(
+                f"Hatch returned {resp.status} ({resp.content_type}); try again later."
+            )
+        try:
+            data = json.loads(text)
+        except ValueError:
+            raise RuntimeError(f"Hatch returned non-JSON (status {resp.status}); try again later.")
     if data.get("status") != "success":
-        raise RuntimeError(f"Login failed: {data.get('message')}")
+        raise RuntimeError(f"Login failed: {data.get('message', 'unknown')}")
     return data
 
 
@@ -29,9 +40,14 @@ async def _fetch(
     headers = {"X-HatchBaby-Auth": token}
     try:
         async with session.get(url, headers=headers) as resp:
-            data = await resp.json()
-            if data.get("status") == "success":
-                return data.get("payload")
+            text = await resp.text()
+            if "application/json" in (resp.content_type or ""):
+                try:
+                    data = json.loads(text)
+                    if data.get("status") == "success":
+                        return data.get("payload")
+                except ValueError:
+                    pass
     except Exception:
         pass
     return None
