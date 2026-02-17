@@ -46,6 +46,12 @@ az containerapp secret set \
     hatch-password="$HATCH_PASSWORD" \
     google-calendar-share-email="$GOOGLE_CALENDAR_SHARE_EMAIL"
 
+# Optional: timezone for calendar event times (e.g. America/Los_Angeles)
+EXTRA_ENV=""
+if [ -n "${HATCH_TIMEZONE:-}" ]; then
+  EXTRA_ENV=" \"HATCH_TIMEZONE=$HATCH_TIMEZONE\""
+fi
+
 echo "Linking secrets to environment variables (keeping existing REDIS_URL, etc.)..."
 az containerapp update \
   --name "$APP_NAME" \
@@ -56,6 +62,6 @@ az containerapp update \
     "GOOGLE_SERVICE_ACCOUNT_FILE=/app/service_account.json" \
     "HATCH_EMAIL=secretref:hatch-email" \
     "HATCH_PASSWORD=secretref:hatch-password" \
-    "GOOGLE_CALENDAR_SHARE_EMAIL=secretref:google-calendar-share-email"
+    "GOOGLE_CALENDAR_SHARE_EMAIL=secretref:google-calendar-share-email"${EXTRA_ENV}
 
 echo "Done. Restart or redeploy the app for new revisions to pick up the secrets."

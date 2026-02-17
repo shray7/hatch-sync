@@ -100,6 +100,7 @@ In **Settings → Secrets and variables → Actions** add:
 Optional:
 
 - **VITE_BASE_URL**: Override base path for GitHub Pages (default is `/<repo-name>/`).
+- **HATCH_TIMEZONE**: Set on the Container App (e.g. in Portal → hatch-sync-api → Environment variables) to an IANA timezone (e.g. `America/Los_Angeles`) so synced calendar events show at the correct local time; if unset, Hatch datetimes are treated as UTC.
 
 Enable **GitHub Pages**: **Settings → Pages → Source** = **GitHub Actions**.
 

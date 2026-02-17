@@ -28,6 +28,7 @@ cp .env.example .env
 5. In `.env` set:
    - `GOOGLE_SERVICE_ACCOUNT_FILE=service_account.json`
    - `GOOGLE_CALENDAR_SHARE_EMAIL=your@gmail.com` (the calendar will be shared with this address so it appears in your Google Calendar).
+   - Optional: `HATCH_TIMEZONE=America/Los_Angeles` (or your IANA timezone) so synced events show at the correct local time; if unset, Hatch times are treated as UTC.
 
 On first sync the app creates a calendar named “{Baby name} - Baby Tracker” and shares it with that email.
 

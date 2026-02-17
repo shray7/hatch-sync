@@ -1,11 +1,14 @@
 """
 Google Calendar helpers: service account auth, get/create baby calendar, create events.
+Hatch API datetimes are interpreted as local time when HATCH_TIMEZONE is set (e.g. America/Los_Angeles),
+then converted to UTC for Google Calendar so events show at the correct local time.
 """
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -64,8 +67,8 @@ def _ensure_shared(service, calendar_id: str, email: str) -> None:
 
 
 def create_event(service, calendar_id: str, summary: str, description: str, start_dt: datetime, end_dt: datetime) -> dict:
-    """Insert a single all-day or timed event. Returns the created event."""
-    # Use datetime for timed events; calendar API wants RFC3339 or date
+    """Insert a single all-day or timed event. start_dt/end_dt should be timezone-aware UTC."""
+    # Use datetime for timed events; calendar API wants RFC3339
     body = {
         "summary": summary,
         "description": description or "",
@@ -79,22 +82,21 @@ def create_event(service, calendar_id: str, summary: str, description: str, star
 
 
 def diaper_to_event(entry: dict) -> tuple[str, str, datetime, datetime]:
-    """(summary, description, start, end) for a diaper entry."""
+    """(summary, description, start, end) for a diaper entry. Times in UTC."""
     raw = entry.get("diaperDate") or entry.get("createDate") or ""
-    dt = _parse_hatch_dt(raw)
+    dt = _hatch_time_to_utc(_parse_hatch_dt(raw))
     dtype = entry.get("diaperType") or "Diaper"
     details = (entry.get("details") or "").strip()
     summary = f"Diaper - {dtype}"
     desc = details or ""
-    # Event is a short block (e.g. 5 min) so it shows at that time
     end = _add_minutes(dt, 5)
     return summary, desc, dt, end
 
 
 def feeding_to_event(entry: dict) -> tuple[str, str, datetime, datetime]:
-    """(summary, description, start, end) for a feeding entry."""
+    """(summary, description, start, end) for a feeding entry. Times in UTC."""
     raw = entry.get("startTime") or entry.get("createDate") or ""
-    dt = _parse_hatch_dt(raw)
+    dt = _hatch_time_to_utc(_parse_hatch_dt(raw))
     method = entry.get("method") or "Feeding"
     source = entry.get("source") or ""
     amount = entry.get("amount")
@@ -110,29 +112,44 @@ def feeding_to_event(entry: dict) -> tuple[str, str, datetime, datetime]:
         desc_parts.append(f"Duration: {duration_sec // 60}m {duration_sec % 60}s")
     description = "\n".join(desc_parts) if desc_parts else ""
     end_raw = entry.get("endTime")
-    end = _parse_hatch_dt(end_raw) if end_raw else _add_minutes(dt, 30)
+    end = _hatch_time_to_utc(_parse_hatch_dt(end_raw)) if end_raw else _add_minutes(dt, 30)
     return summary, description, dt, end
 
 
 def sleep_to_event(entry: dict) -> tuple[str, str, datetime, datetime]:
-    """(summary, description, start, end) for a sleep entry. Adapt to actual API shape."""
-    # Common fields might be startTime/endTime or start/end
+    """(summary, description, start, end) for a sleep entry. Times in UTC."""
     raw_start = entry.get("startTime") or entry.get("start") or entry.get("createDate") or ""
     raw_end = entry.get("endTime") or entry.get("end") or entry.get("updateDate") or ""
-    start_dt = _parse_hatch_dt(raw_start)
-    end_dt = _parse_hatch_dt(raw_end) if raw_end else _add_minutes(start_dt, 60)
+    start_dt = _hatch_time_to_utc(_parse_hatch_dt(raw_start))
+    end_dt = _hatch_time_to_utc(_parse_hatch_dt(raw_end)) if raw_end else _add_minutes(start_dt, 60)
     duration_min = int((end_dt - start_dt).total_seconds() / 60)
     summary = f"Sleep - {duration_min}m"
     return summary, "", start_dt, end_dt
 
 
+def _format_weight_lbs_oz(grams: float) -> str:
+    """Format weight for calendar display, e.g. '8 lb 5.2 oz' or '12.3 oz'."""
+    if grams is None or grams < 0:
+        return ""
+    GRAMS_PER_OZ = 28.3495
+    OZ_PER_LB = 16
+    total_oz = grams / GRAMS_PER_OZ
+    lbs = int(total_oz // OZ_PER_LB)
+    oz = round((total_oz % OZ_PER_LB) * 10) / 10
+    if lbs == 0:
+        return f"{oz} oz"
+    if oz == 0:
+        return f"{lbs} lb"
+    return f"{lbs} lb {oz} oz"
+
+
 def weight_to_event(entry: dict) -> tuple[str, str, datetime, datetime]:
-    """(summary, description, start, end) for a weight entry."""
+    """(summary, description, start, end) for a weight entry. Times in UTC."""
     raw = entry.get("createDate") or entry.get("weightDate") or ""
-    dt = _parse_hatch_dt(raw)
+    dt = _hatch_time_to_utc(_parse_hatch_dt(raw))
     weight_g = entry.get("weight") or entry.get("weightInGrams")
     if weight_g is not None:
-        summary = f"Weight - {weight_g}g"
+        summary = f"Weight - {_format_weight_lbs_oz(weight_g)}"
     else:
         summary = "Weight"
     end = _add_minutes(dt, 5)
@@ -140,7 +157,7 @@ def weight_to_event(entry: dict) -> tuple[str, str, datetime, datetime]:
 
 
 def _parse_hatch_dt(s: str) -> datetime:
-    """Parse Hatch API datetime string to datetime (naive UTC)."""
+    """Parse Hatch API datetime string to naive datetime."""
     if not s:
         return datetime.utcnow()
     s = s.strip().replace("Z", "").replace("T", " ")
@@ -150,6 +167,18 @@ def _parse_hatch_dt(s: str) -> datetime:
         except ValueError:
             continue
     return datetime.utcnow()
+
+
+def _hatch_time_to_utc(dt_naive: datetime) -> datetime:
+    """
+    Interpret naive datetime as local time (if HATCH_TIMEZONE set) and return UTC.
+    If HATCH_TIMEZONE is not set, assume the datetime is already UTC.
+    """
+    tz_name = os.environ.get("HATCH_TIMEZONE", "").strip()
+    if not tz_name:
+        return dt_naive.replace(tzinfo=timezone.utc)
+    tz = ZoneInfo(tz_name)
+    return dt_naive.replace(tzinfo=tz).astimezone(timezone.utc)
 
 
 def _add_minutes(dt: datetime, minutes: int) -> datetime:
