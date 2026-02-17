@@ -47,10 +47,10 @@ az containerapp secret set \
     google-calendar-share-email="$GOOGLE_CALENDAR_SHARE_EMAIL"
 
 # Optional: timezone for calendar event times (e.g. America/Los_Angeles)
+# Optional: minutes between cache refresh jobs (default 15)
 EXTRA_ENV=""
-if [ -n "${HATCH_TIMEZONE:-}" ]; then
-  EXTRA_ENV=" \"HATCH_TIMEZONE=$HATCH_TIMEZONE\""
-fi
+[ -n "${HATCH_TIMEZONE:-}" ] && EXTRA_ENV="${EXTRA_ENV} \"HATCH_TIMEZONE=$HATCH_TIMEZONE\""
+[ -n "${HATCH_CACHE_REFRESH_MINUTES:-}" ] && EXTRA_ENV="${EXTRA_ENV} \"HATCH_CACHE_REFRESH_MINUTES=$HATCH_CACHE_REFRESH_MINUTES\""
 
 echo "Linking secrets to environment variables (keeping existing REDIS_URL, etc.)..."
 az containerapp update \
@@ -59,6 +59,7 @@ az containerapp update \
   --set-env-vars \
     "REDIS_URL=secretref:redis-url" \
     "HATCH_CACHE_TTL_SECONDS=900" \
+    "HATCH_CACHE_REFRESH_MINUTES=${HATCH_CACHE_REFRESH_MINUTES:-15}" \
     "GOOGLE_SERVICE_ACCOUNT_FILE=/app/service_account.json" \
     "HATCH_EMAIL=secretref:hatch-email" \
     "HATCH_PASSWORD=secretref:hatch-password" \

@@ -3,6 +3,7 @@ hatch-sync: FastAPI API for Hatch Rest devices using the unofficial hatch-rest-a
 Also syncs Hatch Grow data (diapers, feedings, sleep, weight) to Google Calendar.
 """
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -40,6 +41,63 @@ from app.sync import run_sync
 # Timeout for outbound requests to Hatch API so /grow/data and /grow/photos don't hang
 HATCH_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=50, connect=15)
 
+# How often to refresh the grow data cache in the background (keeps page loads fast)
+CACHE_REFRESH_INTERVAL_MINUTES = int(os.environ.get("HATCH_CACHE_REFRESH_MINUTES", "15"))
+
+logger = logging.getLogger(__name__)
+
+
+async def refresh_grow_cache() -> None:
+    """
+    Fetch latest grow data from Hatch and update the cache. Runs on a schedule so the cache
+    stays warm and page loads are fast; we update the cache with new data instead of
+    invalidating and waiting for the next request.
+    """
+    email = os.environ.get("HATCH_EMAIL", "").strip()
+    password = os.environ.get("HATCH_PASSWORD", "").strip()
+    if not email or not password:
+        return
+    try:
+        async with aiohttp.ClientSession(timeout=HATCH_HTTP_TIMEOUT) as session:
+            login_data = await get_cached_login()
+            if not login_data:
+                try:
+                    login_data = await hatch_grow_login(session, email, password)
+                    await set_cached_login(login_data)
+                except Exception as e:
+                    logger.warning("refresh_grow_cache: login failed: %s", e)
+                    return
+            babies = login_data.get("payload", {}).get("babies", [])
+            if not babies:
+                return
+            baby_id = babies[0]["id"]
+            token = login_data["token"]
+
+            async def safe_fetch(coro, default):
+                try:
+                    return await coro
+                except Exception:
+                    return default
+
+            diapers, feedings, sleeps, weights = await asyncio.gather(
+                safe_fetch(fetch_diapers(session, token, baby_id), []),
+                safe_fetch(fetch_feedings(session, token, baby_id), []),
+                safe_fetch(fetch_sleep(session, token, baby_id), []),
+                safe_fetch(fetch_weight(session, token, baby_id), []),
+            )
+            await set_cached_grow_data(
+                baby_id,
+                {"diapers": diapers, "feedings": feedings, "sleeps": sleeps, "weights": weights},
+            )
+            logger.info(
+                "refresh_grow_cache: updated cache (diapers=%s feedings=%s sleeps=%s weights=%s)",
+                len(diapers), len(feedings), len(sleeps), len(weights),
+            )
+    except asyncio.TimeoutError:
+        logger.warning("refresh_grow_cache: Hatch API timed out")
+    except Exception as e:
+        logger.warning("refresh_grow_cache: %s", e)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -51,7 +109,15 @@ async def lifespan(app: FastAPI):
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(run_sync, "interval", minutes=15, id="grow_calendar_sync")
+    scheduler.add_job(
+        refresh_grow_cache,
+        "interval",
+        minutes=CACHE_REFRESH_INTERVAL_MINUTES,
+        id="grow_cache_refresh",
+    )
     scheduler.start()
+    # Warm cache on startup so first page load is fast
+    asyncio.create_task(refresh_grow_cache())
     try:
         yield
     finally:
