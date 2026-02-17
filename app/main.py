@@ -11,6 +11,7 @@ import aiohttp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.cache import (
     get_cached_grow_data,
@@ -45,6 +46,24 @@ HATCH_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=50, connect=15)
 CACHE_REFRESH_INTERVAL_MINUTES = int(os.environ.get("HATCH_CACHE_REFRESH_MINUTES", "15"))
 
 logger = logging.getLogger(__name__)
+
+# Single-flight login: when cache is empty, only one request calls Hatch login; others wait.
+# Avoids parallel /grow/data + /grow/photos both logging in and triggering 429.
+_login_lock = asyncio.Lock()
+
+
+async def _get_login_or_fetch(session, email: str, password: str):
+    """Return cached login or perform a single login (other waiters reuse result)."""
+    login_data = await get_cached_login()
+    if login_data:
+        return login_data
+    async with _login_lock:
+        login_data = await get_cached_login()
+        if login_data:
+            return login_data
+        login_data = await hatch_grow_login(session, email, password)
+        await set_cached_login(login_data)
+        return login_data
 
 
 async def refresh_grow_cache() -> None:
@@ -170,34 +189,42 @@ async def health():
 
 @app.get("/grow/data")
 async def grow_data():
-    """Return live Hatch Grow data (babies, feedings, diapers, sleeps, weights). Uses cache when available."""
+    """Return live Hatch Grow data. Always checks cache first; only calls Hatch API on cache miss."""
     email = os.environ.get("HATCH_EMAIL")
     password = os.environ.get("HATCH_PASSWORD")
     if not email or not password:
         raise HTTPException(status_code=503, detail="HATCH_EMAIL and HATCH_PASSWORD required")
     try:
         async with aiohttp.ClientSession(timeout=HATCH_HTTP_TIMEOUT) as session:
-            login_data = await get_cached_login()
-            if not login_data:
-                try:
-                    login_data = await hatch_grow_login(session, email, password)
-                except Exception as e:
-                    raise HTTPException(status_code=503, detail=f"Login failed: {e}")
-                asyncio.create_task(set_cached_login(login_data))  # don't block response on cache write
+            # 1. Cache first: login (single-flight so parallel /data + /photos don't both call Hatch)
+            try:
+                login_data = await _get_login_or_fetch(session, email, password)
+            except Exception as e:
+                raise HTTPException(status_code=503, detail=f"Login failed: {e}")
             babies = login_data.get("payload", {}).get("babies", [])
             if not babies:
-                return {"babies": [], "feedings": [], "diapers": [], "sleeps": [], "weights": []}
+                return JSONResponse(
+                    content={"babies": [], "feedings": [], "diapers": [], "sleeps": [], "weights": []},
+                    headers={"X-Grow-Data-Source": "hatch"},
+                )
             baby_id = babies[0]["id"]
             token = login_data["token"]
+
+            # 2. Cache first: grow data (diapers, feedings, sleep, weights)
             cached = await get_cached_grow_data(baby_id)
             if cached and isinstance(cached, dict):
-                return {
-                    "babies": babies,
-                    "feedings": cached.get("feedings") or [],
-                    "diapers": cached.get("diapers") or [],
-                    "sleeps": cached.get("sleeps") or [],
-                    "weights": cached.get("weights") or [],
-                }
+                return JSONResponse(
+                    content={
+                        "babies": babies,
+                        "feedings": cached.get("feedings") or [],
+                        "diapers": cached.get("diapers") or [],
+                        "sleeps": cached.get("sleeps") or [],
+                        "weights": cached.get("weights") or [],
+                    },
+                    headers={"X-Grow-Data-Source": "cache"},
+                )
+
+            # 3. Cache miss: fetch from Hatch then update cache
             async def safe_fetch(coro, default):
                 try:
                     return await coro
@@ -215,49 +242,56 @@ async def grow_data():
                     baby_id,
                     {"diapers": diapers, "feedings": feedings, "sleeps": sleeps, "weights": weights},
                 )
-            )  # don't block response on cache write
-            return {
-                "babies": babies,
-                "feedings": feedings,
-                "diapers": diapers,
-                "sleeps": sleeps,
-                "weights": weights,
-            }
+            )
+            return JSONResponse(
+                content={
+                    "babies": babies,
+                    "feedings": feedings,
+                    "diapers": diapers,
+                    "sleeps": sleeps,
+                    "weights": weights,
+                },
+                headers={"X-Grow-Data-Source": "hatch"},
+            )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Hatch API timed out; try again in a moment.")
 
 
 @app.get("/grow/photos")
 async def grow_photos():
-    """Return daily photos from Hatch Grow (live API). Requires HATCH_EMAIL and HATCH_PASSWORD."""
+    """Return daily photos. Always checks cache first; only calls Hatch API on cache miss."""
     email = os.environ.get("HATCH_EMAIL")
     password = os.environ.get("HATCH_PASSWORD")
     if not email or not password:
         raise HTTPException(status_code=503, detail="HATCH_EMAIL and HATCH_PASSWORD required")
     try:
         async with aiohttp.ClientSession(timeout=HATCH_HTTP_TIMEOUT) as session:
-            # Try cached login (token + babies) first
-            login_data = await get_cached_login()
-            if not login_data:
-                try:
-                    login_data = await hatch_grow_login(session, email, password)
-                except Exception as e:
-                    raise HTTPException(status_code=503, detail=f"Login failed: {e}")
-                asyncio.create_task(set_cached_login(login_data))  # don't block response on cache write
-
+            # 1. Cache first: login (single-flight so parallel /data + /photos don't both call Hatch)
+            try:
+                login_data = await _get_login_or_fetch(session, email, password)
+            except Exception as e:
+                raise HTTPException(status_code=503, detail=f"Login failed: {e}")
             token = login_data["token"]
             babies = login_data.get("payload", {}).get("babies", [])
             if not babies:
-                return {"photos": []}
+                return JSONResponse(content={"photos": []}, headers={"X-Grow-Data-Source": "hatch"})
             baby_id = babies[0]["id"]
-            # Try cached photos for this baby
+
+            # 2. Cache first: photos
             cached_photos = await get_cached_photos(baby_id)
             if cached_photos is not None:
-                return {"photos": cached_photos}
+                return JSONResponse(
+                    content={"photos": cached_photos},
+                    headers={"X-Grow-Data-Source": "cache"},
+                )
 
+            # 3. Cache miss: fetch from Hatch then update cache
             photos = await fetch_photos(session, token, baby_id)
-            asyncio.create_task(set_cached_photos(baby_id, photos))  # don't block response on cache write
-            return {"photos": photos}
+            asyncio.create_task(set_cached_photos(baby_id, photos))
+            return JSONResponse(
+                content={"photos": photos},
+                headers={"X-Grow-Data-Source": "hatch"},
+            )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Hatch API timed out; try again in a moment.")
 
