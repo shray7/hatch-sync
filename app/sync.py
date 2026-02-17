@@ -1,6 +1,7 @@
 """
 Sync Hatch Grow data (diapers, feedings, sleep, weight) to Google Calendar.
 Tracks last-seen record IDs per baby per type so only new entries become events.
+State is stored in Redis when available (survives restarts); otherwise falls back to sync_state.json.
 """
 from __future__ import annotations
 
@@ -13,8 +14,10 @@ import aiohttp
 
 from app.cache import (
     get_cached_grow_data,
+    get_cached_json,
     get_cached_login,
     set_cached_grow_data,
+    set_cached_json,
     set_cached_login,
 )
 from app.gcal_service import (
@@ -37,35 +40,53 @@ from app.hatch_grow_service import (
 logger = logging.getLogger(__name__)
 
 STATE_FILE = Path(__file__).resolve().parent.parent / "sync_state.json"
+SYNC_STATE_CACHE_KEY = "sync:state"
+SYNC_STATE_TTL_SECONDS = 10 * 365 * 24 * 3600  # 10 years; state must survive restarts
 
 
-def _load_state() -> dict:
+def _load_state_file() -> dict:
     if not STATE_FILE.exists():
         return {}
     try:
         with open(STATE_FILE) as f:
             return json.load(f)
     except Exception as e:
-        logger.warning("Could not load sync state: %s", e)
+        logger.warning("Could not load sync state file: %s", e)
         return {}
 
 
-def _save_state(state: dict) -> None:
+def _save_state_file(state: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
+
+
+async def _load_state() -> dict:
+    """Load state from Redis if available, else from file (file is ephemeral on Azure)."""
+    state = await get_cached_json(SYNC_STATE_CACHE_KEY)
+    if isinstance(state, dict):
+        return state
+    return _load_state_file()
+
+
+async def _save_state(state: dict) -> None:
+    """Persist state to Redis (when available) and to file as fallback."""
+    await set_cached_json(SYNC_STATE_CACHE_KEY, state, SYNC_STATE_TTL_SECONDS)
+    _save_state_file(state)
 
 
 def _state_key(baby_id: int, data_type: str) -> str:
     return f"baby_{baby_id}_{data_type}"
 
 
-def _get_seen_ids(state: dict, baby_id: int, data_type: str) -> set[int | str]:
+def _get_seen_ids(state: dict, baby_id: int, data_type: str) -> set[str]:
+    """Return seen record IDs as strings for consistent comparison (avoids int/str duplicate)."""
     key = _state_key(baby_id, data_type)
-    return set(state.get(key, []))
+    raw = state.get(key, [])
+    return set(str(x) for x in raw)
 
 
-def _set_seen_ids(state: dict, baby_id: int, data_type: str, ids: list[int | str]) -> None:
+def _set_seen_ids(state: dict, baby_id: int, data_type: str, ids: list[str]) -> None:
     key = _state_key(baby_id, data_type)
     state[key] = list(ids)
 
@@ -95,7 +116,7 @@ async def run_sync() -> dict:
         summary["errors"].append("GOOGLE_SERVICE_ACCOUNT_FILE not set or file missing")
         return summary
 
-    state = _load_state()
+    state = await _load_state()
 
     try:
         service = get_calendar_service()
@@ -173,16 +194,16 @@ async def run_sync() -> dict:
                     },
                 )
 
-            # Diapers → events
+            # Diapers → events (use str(rid) so int/str mismatch doesn't create duplicates)
             seen = _get_seen_ids(state, baby_id, "diaper")
             for d in diapers:
                 rid = d.get("id")
-                if rid is not None and rid not in seen:
+                if rid is not None and str(rid) not in seen:
                     try:
                         summy, desc, start, end = diaper_to_event(d)
                         create_event(service, cal_id, summy, desc, start, end)
                         summary["events_created"] += 1
-                        seen.add(rid)
+                        seen.add(str(rid))
                     except Exception as e:
                         summary["errors"].append(f"Diaper event {rid}: {e}")
             _set_seen_ids(state, baby_id, "diaper", list(seen))
@@ -191,12 +212,12 @@ async def run_sync() -> dict:
             seen = _get_seen_ids(state, baby_id, "feeding")
             for f in feedings:
                 rid = f.get("id")
-                if rid is not None and rid not in seen:
+                if rid is not None and str(rid) not in seen:
                     try:
                         summy, desc, start, end = feeding_to_event(f)
                         create_event(service, cal_id, summy, desc, start, end)
                         summary["events_created"] += 1
-                        seen.add(rid)
+                        seen.add(str(rid))
                     except Exception as e:
                         summary["errors"].append(f"Feeding event {rid}: {e}")
             _set_seen_ids(state, baby_id, "feeding", list(seen))
@@ -205,12 +226,12 @@ async def run_sync() -> dict:
             seen = _get_seen_ids(state, baby_id, "sleep")
             for s in sleeps:
                 rid = s.get("id")
-                if rid is not None and rid not in seen:
+                if rid is not None and str(rid) not in seen:
                     try:
                         summy, desc, start, end = sleep_to_event(s)
                         create_event(service, cal_id, summy, desc, start, end)
                         summary["events_created"] += 1
-                        seen.add(rid)
+                        seen.add(str(rid))
                     except Exception as e:
                         summary["errors"].append(f"Sleep event {rid}: {e}")
             _set_seen_ids(state, baby_id, "sleep", list(seen))
@@ -219,15 +240,15 @@ async def run_sync() -> dict:
             seen = _get_seen_ids(state, baby_id, "weight")
             for w in weights:
                 rid = w.get("id")
-                if rid is not None and rid not in seen:
+                if rid is not None and str(rid) not in seen:
                     try:
                         summy, desc, start, end = weight_to_event(w)
                         create_event(service, cal_id, summy, desc, start, end)
                         summary["events_created"] += 1
-                        seen.add(rid)
+                        seen.add(str(rid))
                     except Exception as e:
                         summary["errors"].append(f"Weight event {rid}: {e}")
             _set_seen_ids(state, baby_id, "weight", list(seen))
 
-    _save_state(state)
+    await _save_state(state)
     return summary

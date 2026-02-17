@@ -29,8 +29,8 @@
         :sub="`Last 7 days avg: ${sevenDayAverages.sleepHours.toFixed(1)}h`"
       />
       <StatCard
-        label="Last weight (g)"
-        :value="lastWeight"
+        label="Last weight"
+        :value="lastWeightFormatted"
         :sub="lastWeightDate"
       />
     </section>
@@ -58,9 +58,9 @@
         :data="sleepPerDay.values"
       />
       <TimeSeriesChart
-        title="Weight over time (g)"
+        title="Weight over time (lb)"
         :labels="weightOverTime.labels"
-        :data="weightOverTime.values"
+        :data="weightOverTime.valuesLbs"
       />
     </section>
 
@@ -153,6 +153,7 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { fetchGrowData, fetchPhotos } from "../api/grow";
+import { formatWeightLbsOz, gramsToLbs } from "../utils/weight";
 import StatCard from "../components/StatCard.vue";
 import TimeSeriesChart from "../components/TimeSeriesChart.vue";
 
@@ -313,7 +314,7 @@ const sleepPerDay = computed(() => {
 });
 
 const weightOverTime = computed(() => {
-  if (!raw.value) return { labels: [], values: [] };
+  if (!raw.value) return { labels: [], values: [], valuesLbs: [] };
   const sorted = [...raw.value.weights].sort(
     (a, b) =>
       new Date(a.weightDate || a.createDate) -
@@ -321,12 +322,13 @@ const weightOverTime = computed(() => {
   );
   return {
     labels: sorted.map((w) => dateKey(w.weightDate || w.createDate)),
-    values: sorted.map((w) => w.weight)
+    values: sorted.map((w) => w.weight),
+    valuesLbs: sorted.map((w) => gramsToLbs(w.weight))
   };
 });
 
 const lastWeight = computed(() => {
-  if (!raw.value || raw.value.weights.length === 0) return "-";
+  if (!raw.value || raw.value.weights.length === 0) return null;
   const sorted = [...raw.value.weights].sort(
     (a, b) =>
       new Date(a.weightDate || a.createDate) -
@@ -334,6 +336,10 @@ const lastWeight = computed(() => {
   );
   return sorted[sorted.length - 1].weight;
 });
+
+const lastWeightFormatted = computed(() =>
+  lastWeight.value != null ? formatWeightLbsOz(lastWeight.value) : "–"
+);
 
 const lastWeightDate = computed(() => {
   if (!raw.value || raw.value.weights.length === 0) return "";

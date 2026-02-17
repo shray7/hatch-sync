@@ -11,9 +11,9 @@
 
     <section v-if="loaded" class="grid grid-cols-1 gap-4 md:grid-cols-2">
       <TimeSeriesChart
-        title="Weight over time (g)"
+        title="Weight over time (lb)"
         :labels="weightOverTime.labels"
-        :data="weightOverTime.values"
+        :data="weightOverTime.valuesLbs"
       />
       <div class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70 p-4">
         <div class="mb-2 text-sm font-medium text-slate-200">
@@ -22,12 +22,12 @@
         <ul class="space-y-1 text-xs text-slate-300">
           <li>
             <span class="text-slate-400">Latest weight:</span>
-            <span class="ml-1 font-semibold">{{ latest?.weight ?? "-" }} g</span>
+            <span class="ml-1 font-semibold">{{ latestWeightFormatted }}</span>
             <span v-if="latest" class="ml-1 text-slate-500">({{ latest.date }})</span>
           </li>
-          <li v-if="gainPerWeek !== null">
+          <li v-if="gainPerWeekOz !== null">
             <span class="text-slate-400">Approx. gain per week:</span>
-            <span class="ml-1 font-semibold">{{ gainPerWeek.toFixed(0) }} g</span>
+            <span class="ml-1 font-semibold">{{ gainPerWeekFormatted }}</span>
           </li>
         </ul>
       </div>
@@ -51,7 +51,7 @@
           </div>
           <div>
             <span class="md:hidden text-slate-400">Weight: </span
-            >{{ w.weight }} g
+            >{{ formatWeightLbsOz(w.weight) }}
           </div>
         </div>
       </div>
@@ -66,6 +66,7 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { fetchGrowData } from "../api/grow";
+import { formatWeightLbsOz, gramsToLbs } from "../utils/weight";
 import TimeSeriesChart from "../components/TimeSeriesChart.vue";
 
 const raw = ref(null);
@@ -76,7 +77,7 @@ function toDate(dateStr) {
 }
 
 const weightOverTime = computed(() => {
-  if (!raw.value) return { labels: [], values: [] };
+  if (!raw.value) return { labels: [], values: [], valuesLbs: [] };
   const sorted = [...raw.value.weights].sort(
     (a, b) =>
       toDate(a.weightDate || a.createDate) -
@@ -84,7 +85,8 @@ const weightOverTime = computed(() => {
   );
   return {
     labels: sorted.map((w) => (w.weightDate || w.createDate).slice(0, 10)),
-    values: sorted.map((w) => w.weight)
+    values: sorted.map((w) => w.weight),
+    valuesLbs: sorted.map((w) => gramsToLbs(w.weight))
   };
 });
 
@@ -111,7 +113,11 @@ const latest = computed(() => {
   return list.length ? list[0] : null;
 });
 
-const gainPerWeek = computed(() => {
+const latestWeightFormatted = computed(() =>
+  latest.value?.weight != null ? formatWeightLbsOz(latest.value.weight) : "–"
+);
+
+const gainPerWeekOz = computed(() => {
   const list = allWeights.value;
   if (list.length < 2) return null;
   const oldest = list[list.length - 1];
@@ -119,8 +125,18 @@ const gainPerWeek = computed(() => {
   const days =
     (toDate(newest.date) - toDate(oldest.date)) / (1000 * 60 * 60 * 24);
   if (days <= 0) return null;
-  const gainPerDay = (newest.weight - oldest.weight) / days;
-  return gainPerDay * 7;
+  const gainPerDayG = (newest.weight - oldest.weight) / days;
+  return (gainPerDayG * 7) / 28.3495; // grams per week -> oz per week
+});
+
+const gainPerWeekFormatted = computed(() => {
+  const oz = gainPerWeekOz.value;
+  if (oz == null) return "–";
+  const lbs = Math.floor(oz / 16);
+  const remOz = Math.round((oz % 16) * 10) / 10;
+  if (lbs === 0) return `${oz.toFixed(1)} oz`;
+  if (remOz === 0) return `${lbs} lb`;
+  return `${lbs} lb ${remOz} oz`;
 });
 
 onMounted(async () => {
