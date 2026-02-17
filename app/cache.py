@@ -14,7 +14,7 @@ import os
 from typing import Any, Optional
 
 # Timeout for Redis operations so request handlers never hang when Redis is unreachable
-REDIS_OP_TIMEOUT_SECONDS = 3.0
+REDIS_OP_TIMEOUT_SECONDS = 2.0
 
 logger = logging.getLogger(__name__)
 

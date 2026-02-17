@@ -383,26 +383,31 @@ function formatPhotoDate(dateStr) {
 }
 
 onMounted(async () => {
-  try {
-    const data = await fetchGrowData();
-    raw.value = data;
-  } catch (e) {
+  // Load data and photos in parallel so stats appear as soon as /grow/data returns
+  const [dataResult, photoResult] = await Promise.allSettled([
+    fetchGrowData(),
+    fetchPhotos()
+  ]);
+
+  if (dataResult.status === "fulfilled") {
+    raw.value = dataResult.value;
+  } else {
+    const e = dataResult.reason;
     const detail = e.response?.data?.detail ?? e.message;
     dataError.value = typeof detail === "string" ? detail : "Failed to load data.";
-  } finally {
-    loaded.value = true;
   }
+  loaded.value = true;
 
-  try {
-    const photoData = await fetchPhotos();
+  if (photoResult.status === "fulfilled") {
+    const photoData = photoResult.value;
     const list = photoData?.photos ?? photoData?.payload?.photos ?? [];
     photos.value = Array.isArray(list) ? list : [];
-  } catch (e) {
+  } else {
+    const e = photoResult.reason;
     const detail = e.response?.data?.detail ?? e.message;
     photosError.value = typeof detail === "string" ? detail : "Failed to load photos.";
-  } finally {
-    photosLoaded.value = true;
   }
+  photosLoaded.value = true;
 });
 </script>
 
