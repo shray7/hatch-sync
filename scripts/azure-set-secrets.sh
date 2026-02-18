@@ -20,6 +20,8 @@ missing=()
 [ -z "${HATCH_EMAIL:-}" ] && missing+=(HATCH_EMAIL)
 [ -z "${HATCH_PASSWORD:-}" ] && missing+=(HATCH_PASSWORD)
 [ -z "${GOOGLE_CALENDAR_SHARE_EMAIL:-}" ] && missing+=(GOOGLE_CALENDAR_SHARE_EMAIL)
+[ -z "${AZURE_BLOB_CONNECTION_STRING:-}" ] && missing+=(AZURE_BLOB_CONNECTION_STRING)
+[ -z "${AZURE_BLOB_CONTAINER:-}" ] && missing+=(AZURE_BLOB_CONTAINER)
 
 if [ ${#missing[@]} -gt 0 ]; then
   echo "Missing required environment variables: ${missing[*]}"
@@ -44,7 +46,8 @@ az containerapp secret set \
     redis-url="$REDIS_URL" \
     hatch-email="$HATCH_EMAIL" \
     hatch-password="$HATCH_PASSWORD" \
-    google-calendar-share-email="$GOOGLE_CALENDAR_SHARE_EMAIL"
+    google-calendar-share-email="$GOOGLE_CALENDAR_SHARE_EMAIL" \
+    azure-blob-connection-string="$AZURE_BLOB_CONNECTION_STRING"
 
 # Optional: timezone for calendar event times (e.g. America/Los_Angeles)
 # Optional: minutes between cache refresh jobs (default 15)
@@ -60,6 +63,8 @@ az containerapp update \
     "REDIS_URL=secretref:redis-url" \
     "HATCH_CACHE_TTL_SECONDS=900" \
     "HATCH_CACHE_REFRESH_MINUTES=${HATCH_CACHE_REFRESH_MINUTES:-15}" \
+    "AZURE_BLOB_CONNECTION_STRING=secretref:azure-blob-connection-string" \
+    "AZURE_BLOB_CONTAINER=$AZURE_BLOB_CONTAINER" \
     "GOOGLE_SERVICE_ACCOUNT_FILE=/app/service_account.json" \
     "HATCH_EMAIL=secretref:hatch-email" \
     "HATCH_PASSWORD=secretref:hatch-password" \

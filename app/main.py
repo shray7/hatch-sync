@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 
 import aiohttp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -38,6 +38,7 @@ from app.hatch_grow_service import (
     login as hatch_grow_login,
 )
 from app.sync import run_sync
+from app.photo_store import fetch_and_store_photo, get_photo_bytes, make_photo_key
 
 # Timeout for outbound requests to Hatch API so /grow/data and /grow/photos don't hang
 HATCH_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=50, connect=15)
@@ -280,21 +281,66 @@ async def grow_photos():
             # 2. Cache first: photos
             cached_photos = await get_cached_photos(baby_id)
             if cached_photos is not None:
+                # Augment each photo with a stable internal photoKey for Blob-backed storage
+                enriched = []
+                for entry in cached_photos:
+                    key = make_photo_key(baby_id, entry)
+                    enriched.append({**entry, "photoKey": key, "babyId": baby_id})
                 return JSONResponse(
-                    content={"photos": cached_photos},
+                    content={"photos": enriched},
                     headers={"X-Grow-Data-Source": "cache"},
                 )
 
             # 3. Cache miss: fetch from Hatch then update cache
             photos = await fetch_photos(session, token, baby_id)
             asyncio.create_task(set_cached_photos(baby_id, photos))
+            enriched = []
+            for entry in photos:
+                key = make_photo_key(baby_id, entry)
+                enriched.append({**entry, "photoKey": key, "babyId": baby_id})
             return JSONResponse(
-                content={"photos": photos},
+                content={"photos": enriched},
                 headers={"X-Grow-Data-Source": "hatch"},
             )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Hatch API timed out; try again in a moment.")
 
+
+@app.get("/photos/image")
+async def photo_image(baby_id: int, key: str):
+    """
+    Serve a photo image from Azure Blob Storage by internal key.
+
+    If the blob is missing, fall back to Hatch:
+    - Look up the photo in cached /grow/photos data for this baby to get its URL.
+    - Download once from Hatch, store in Blob, and stream back to the client.
+    """
+    # 1. Try Blob first
+    data = await get_photo_bytes(key)
+    if data is not None:
+        return Response(content=data, media_type="image/jpeg")
+
+    # 2. Fallback: try to find the photo URL from cached photos metadata
+    cached_photos = await get_cached_photos(baby_id)
+    if not cached_photos:
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    entry = None
+    for p in cached_photos:
+        if make_photo_key(baby_id, p) == key:
+            entry = p
+            break
+    if not entry:
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    url = entry.get("cutDownloadUrl") or entry.get("downloadUrl") or ""
+    if not url:
+        raise HTTPException(status_code=404, detail="Photo URL not available")
+
+    data = await fetch_and_store_photo(url, key)
+    if data is None:
+        raise HTTPException(status_code=502, detail="Failed to fetch photo from Hatch")
+    return Response(content=data, media_type="image/jpeg")
 
 @app.post("/sync")
 async def trigger_sync():

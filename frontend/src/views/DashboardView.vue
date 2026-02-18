@@ -165,6 +165,16 @@ const photosLoaded = ref(false);
 const photosError = ref(null);
 const failedImages = ref(new Set());
 
+function photoUrl(photo) {
+  if (!photo?.photoKey || !photo?.babyId) return null;
+  const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  const params = new URLSearchParams({
+    baby_id: String(photo.babyId),
+    key: photo.photoKey
+  });
+  return `${apiBase}/photos/image?${params.toString()}`;
+}
+
 function dateKey(dateStr) {
   return dateStr.slice(0, 10);
 }

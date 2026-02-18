@@ -83,7 +83,14 @@ const error = ref(null);
 const failedImages = ref(new Set());
 
 function photoUrl(photo) {
-  return photo?.cutDownloadUrl ?? photo?.cut_download_url ?? null;
+  // Use backend proxy with internal photoKey so images come from our Blob storage
+  if (!photo?.photoKey || !photo?.babyId) return null;
+  const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  const params = new URLSearchParams({
+    baby_id: String(photo.babyId),
+    key: photo.photoKey
+  });
+  return `${apiBase}/photos/image?${params.toString()}`;
 }
 
 function onImageError(event, photo) {
