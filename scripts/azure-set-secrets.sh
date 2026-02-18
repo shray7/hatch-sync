@@ -51,23 +51,30 @@ az containerapp secret set \
 
 # Optional: timezone for calendar event times (e.g. America/Los_Angeles)
 # Optional: minutes between cache refresh jobs (default 15)
-EXTRA_ENV=""
-[ -n "${HATCH_TIMEZONE:-}" ] && EXTRA_ENV="${EXTRA_ENV} \"HATCH_TIMEZONE=$HATCH_TIMEZONE\""
-[ -n "${HATCH_CACHE_REFRESH_MINUTES:-}" ] && EXTRA_ENV="${EXTRA_ENV} \"HATCH_CACHE_REFRESH_MINUTES=$HATCH_CACHE_REFRESH_MINUTES\""
-
 echo "Linking secrets to environment variables (keeping existing REDIS_URL, etc.)..."
+env_vars=(
+  "REDIS_URL=secretref:redis-url"
+  "HATCH_CACHE_TTL_SECONDS=900"
+  "HATCH_CACHE_REFRESH_MINUTES=${HATCH_CACHE_REFRESH_MINUTES:-15}"
+  "AZURE_BLOB_CONNECTION_STRING=secretref:azure-blob-connection-string"
+  "AZURE_BLOB_CONTAINER=$AZURE_BLOB_CONTAINER"
+  "GOOGLE_SERVICE_ACCOUNT_FILE=/app/service_account.json"
+  "HATCH_EMAIL=secretref:hatch-email"
+  "HATCH_PASSWORD=secretref:hatch-password"
+  "GOOGLE_CALENDAR_SHARE_EMAIL=secretref:google-calendar-share-email"
+)
+
+if [ -n "${HATCH_TIMEZONE:-}" ]; then
+  env_vars+=("HATCH_TIMEZONE=$HATCH_TIMEZONE")
+fi
+
+if [ -n "${HATCH_CACHE_REFRESH_MINUTES:-}" ]; then
+  env_vars+=("HATCH_CACHE_REFRESH_MINUTES=$HATCH_CACHE_REFRESH_MINUTES")
+fi
+
 az containerapp update \
   --name "$APP_NAME" \
   --resource-group "$RESOURCE_GROUP" \
-  --set-env-vars \
-    "REDIS_URL=secretref:redis-url" \
-    "HATCH_CACHE_TTL_SECONDS=900" \
-    "HATCH_CACHE_REFRESH_MINUTES=${HATCH_CACHE_REFRESH_MINUTES:-15}" \
-    "AZURE_BLOB_CONNECTION_STRING=secretref:azure-blob-connection-string" \
-    "AZURE_BLOB_CONTAINER=$AZURE_BLOB_CONTAINER" \
-    "GOOGLE_SERVICE_ACCOUNT_FILE=/app/service_account.json" \
-    "HATCH_EMAIL=secretref:hatch-email" \
-    "HATCH_PASSWORD=secretref:hatch-password" \
-    "GOOGLE_CALENDAR_SHARE_EMAIL=secretref:google-calendar-share-email"${EXTRA_ENV}
+  --set-env-vars "${env_vars[@]}"
 
 echo "Done. Restart or redeploy the app for new revisions to pick up the secrets."

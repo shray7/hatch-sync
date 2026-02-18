@@ -375,10 +375,6 @@ const photosLast7Days = computed(() => {
     .sort((a, b) => new Date(b.createDate || 0) - new Date(a.createDate || 0));
 });
 
-function photoUrl(photo) {
-  return photo?.cutDownloadUrl ?? photo?.cut_download_url ?? null;
-}
-
 function onPhotoError(photo) {
   if (photo?.createDate) failedImages.value.add(photo.createDate);
   failedImages.value = new Set(failedImages.value);
