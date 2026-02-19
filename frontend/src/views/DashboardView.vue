@@ -17,31 +17,33 @@
         label="Diapers today"
         :value="todayCounts.diapers"
         :sub="`7-day avg: ${sevenDayAverages.diapers.toFixed(1)}`"
-        class="animate-fade-slide-up"
+        :animate-count="true"
+        class="animate-fade-slide-up delay-75"
       />
       <StatCard
         label="Feedings today"
         :value="todayCounts.feedings"
         :sub="`7-day avg: ${sevenDayAverages.feedings.toFixed(1)}`"
-        class="animate-fade-slide-up"
+        :animate-count="true"
+        class="animate-fade-slide-up delay-150"
       />
       <StatCard
         label="Avg between diapers"
         :value="avgDiaperIntervalFormatted"
         sub="Last 7 days"
-        class="animate-fade-slide-up"
+        class="animate-fade-slide-up delay-200"
       />
       <StatCard
         label="Avg between feedings"
         :value="avgFeedingIntervalFormatted"
         sub="Last 7 days"
-        class="animate-fade-slide-up"
+        class="animate-fade-slide-up delay-300"
       />
       <StatCard
         label="Last weight"
         :value="lastWeightFormatted"
         :sub="lastWeightDate"
-        class="animate-fade-slide-up"
+        class="animate-fade-slide-up delay-500"
       />
     </section>
 
