@@ -17,10 +17,14 @@ from app.cache import (
     get_cached_grow_data,
     get_cached_login,
     get_cached_photos,
+    get_cached_stale_grow_data,
+    get_cached_stale_photos,
     redis_health,
     set_cached_grow_data,
     set_cached_login,
     set_cached_photos,
+    set_cached_stale_grow_data,
+    set_cached_stale_photos,
 )
 from app.hatch_service import (
     get_credentials,
@@ -193,9 +197,16 @@ async def health():
     }
 
 
+def _is_rate_limit_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return "429" in msg or "rate limit" in msg
+
+
 @app.get("/grow/data")
 async def grow_data():
-    """Return live Hatch Grow data. Always checks cache first; only calls Hatch API on cache miss."""
+    """Return live Hatch Grow data. Always checks cache first; only calls Hatch API on cache miss.
+    On 429 rate limit, returns last cached response with rateLimitedStale note if available.
+    """
     email = os.environ.get("HATCH_EMAIL")
     password = os.environ.get("HATCH_PASSWORD")
     if not email or not password:
@@ -206,6 +217,17 @@ async def grow_data():
             try:
                 login_data = await _get_login_or_fetch(session, email, password)
             except Exception as e:
+                if _is_rate_limit_error(e):
+                    stale = await get_cached_stale_grow_data()
+                    if stale is not None:
+                        content = {**stale, "rateLimitedStale": True}
+                        return JSONResponse(
+                            content=content,
+                            headers={
+                                "X-Grow-Data-Source": "stale",
+                                "X-Grow-Rate-Limited": "true",
+                            },
+                        )
                 raise HTTPException(status_code=503, detail=f"Login failed: {e}")
             babies = login_data.get("payload", {}).get("babies", [])
             if not babies:
@@ -219,14 +241,16 @@ async def grow_data():
             # 2. Cache first: grow data (diapers, feedings, sleep, weights)
             cached = await get_cached_grow_data(baby_id)
             if cached and isinstance(cached, dict):
+                content = {
+                    "babies": babies,
+                    "feedings": cached.get("feedings") or [],
+                    "diapers": cached.get("diapers") or [],
+                    "sleeps": cached.get("sleeps") or [],
+                    "weights": cached.get("weights") or [],
+                }
+                asyncio.create_task(set_cached_stale_grow_data(content))
                 return JSONResponse(
-                    content={
-                        "babies": babies,
-                        "feedings": cached.get("feedings") or [],
-                        "diapers": cached.get("diapers") or [],
-                        "sleeps": cached.get("sleeps") or [],
-                        "weights": cached.get("weights") or [],
-                    },
+                    content=content,
                     headers={"X-Grow-Data-Source": "cache"},
                 )
 
@@ -249,14 +273,16 @@ async def grow_data():
                     {"diapers": diapers, "feedings": feedings, "sleeps": sleeps, "weights": weights},
                 )
             )
+            content = {
+                "babies": babies,
+                "feedings": feedings,
+                "diapers": diapers,
+                "sleeps": sleeps,
+                "weights": weights,
+            }
+            asyncio.create_task(set_cached_stale_grow_data(content))
             return JSONResponse(
-                content={
-                    "babies": babies,
-                    "feedings": feedings,
-                    "diapers": diapers,
-                    "sleeps": sleeps,
-                    "weights": weights,
-                },
+                content=content,
                 headers={"X-Grow-Data-Source": "hatch"},
             )
     except asyncio.TimeoutError:
@@ -265,7 +291,9 @@ async def grow_data():
 
 @app.get("/grow/photos")
 async def grow_photos():
-    """Return daily photos. Always checks cache first; only calls Hatch API on cache miss."""
+    """Return daily photos. Always checks cache first; only calls Hatch API on cache miss.
+    On 429 rate limit, returns last cached photos with rateLimitedStale note if available.
+    """
     email = os.environ.get("HATCH_EMAIL")
     password = os.environ.get("HATCH_PASSWORD")
     if not email or not password:
@@ -276,6 +304,17 @@ async def grow_photos():
             try:
                 login_data = await _get_login_or_fetch(session, email, password)
             except Exception as e:
+                if _is_rate_limit_error(e):
+                    stale = await get_cached_stale_photos()
+                    if stale is not None:
+                        content = {**stale, "rateLimitedStale": True}
+                        return JSONResponse(
+                            content=content,
+                            headers={
+                                "X-Grow-Data-Source": "stale",
+                                "X-Grow-Rate-Limited": "true",
+                            },
+                        )
                 raise HTTPException(status_code=503, detail=f"Login failed: {e}")
             token = login_data["token"]
             babies = login_data.get("payload", {}).get("babies", [])
@@ -291,8 +330,10 @@ async def grow_photos():
                 for entry in cached_photos:
                     key = make_photo_key(baby_id, entry)
                     enriched.append({**entry, "photoKey": key, "babyId": baby_id})
+                content = {"photos": enriched}
+                asyncio.create_task(set_cached_stale_photos(content))
                 return JSONResponse(
-                    content={"photos": enriched},
+                    content=content,
                     headers={"X-Grow-Data-Source": "cache"},
                 )
 
@@ -303,8 +344,10 @@ async def grow_photos():
             for entry in photos:
                 key = make_photo_key(baby_id, entry)
                 enriched.append({**entry, "photoKey": key, "babyId": baby_id})
+            content = {"photos": enriched}
+            asyncio.create_task(set_cached_stale_photos(content))
             return JSONResponse(
-                content={"photos": enriched},
+                content=content,
                 headers={"X-Grow-Data-Source": "hatch"},
             )
     except asyncio.TimeoutError:

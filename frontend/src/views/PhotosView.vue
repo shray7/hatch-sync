@@ -12,6 +12,14 @@
       </p>
     </section>
 
+    <section
+      v-if="rateLimitedStale"
+      class="rounded-xl border border-amber-900/40 border-slate-800 bg-amber-950/30 p-3"
+    >
+      <p class="text-sm text-amber-200/90">Rate limited; showing cached data.</p>
+      <p class="mt-1 text-xs text-slate-400">Refresh in a few minutes for the latest photos.</p>
+    </section>
+
     <section v-if="error" class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70 p-4">
       <p class="text-sm text-rose-300">{{ error }}</p>
       <p v-if="is404" class="mt-2 text-xs text-slate-400">
@@ -81,6 +89,7 @@ const photos = ref([]);
 const loaded = ref(false);
 const error = ref(null);
 const failedImages = ref(new Set());
+const rateLimitedStale = ref(false);
 
 function photoUrl(photo) {
   // Use backend proxy with internal photoKey so images come from our Blob storage
@@ -126,6 +135,7 @@ function formatDate(dateStr) {
 onMounted(async () => {
   try {
     const data = await fetchPhotos();
+    if (data?.rateLimitedStale) rateLimitedStale.value = true;
     const list = data?.photos ?? data?.payload?.photos ?? [];
     photos.value = Array.isArray(list) ? list : [];
   } catch (e) {

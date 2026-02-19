@@ -30,6 +30,8 @@ REDIS_URL = os.environ.get("REDIS_URL")
 # Default TTLs (can be overridden via env for data/photos)
 DEFAULT_DATA_TTL_SECONDS = int(os.environ.get("HATCH_CACHE_TTL_SECONDS", "900"))
 DEFAULT_LOGIN_TTL_SECONDS = 50 * 60  # 50 minutes
+# Stale snapshot TTL for rate-limit fallback (serve last good response when 429)
+STALE_GROW_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 
 _redis: Optional[Redis] = None
 _cache_enabled: bool = False
@@ -170,6 +172,40 @@ async def set_cached_photos(
     """Cache photos list for a baby."""
     ttl = ttl_seconds or DEFAULT_DATA_TTL_SECONDS
     await set_cached_json(_photos_key(baby_id), photos, ttl)
+
+
+def _stale_grow_data_key() -> str:
+    return "hatch:grow:stale:data"
+
+
+def _stale_photos_key() -> str:
+    return "hatch:grow:stale:photos"
+
+
+async def get_cached_stale_grow_data() -> Optional[dict[str, Any]]:
+    """Return last successful grow data response for stale-while-revalidate on 429."""
+    data = await get_cached_json(_stale_grow_data_key())
+    if isinstance(data, dict) and "feedings" in data:
+        return data
+    return None
+
+
+async def set_cached_stale_grow_data(content: dict[str, Any]) -> None:
+    """Store a full grow data response for serving when rate limited."""
+    await set_cached_json(_stale_grow_data_key(), content, STALE_GROW_TTL_SECONDS)
+
+
+async def get_cached_stale_photos() -> Optional[dict[str, Any]]:
+    """Return last successful photos response for stale-while-revalidate on 429."""
+    data = await get_cached_json(_stale_photos_key())
+    if isinstance(data, dict) and "photos" in data:
+        return data
+    return None
+
+
+async def set_cached_stale_photos(content: dict[str, Any]) -> None:
+    """Store a full photos response for serving when rate limited."""
+    await set_cached_json(_stale_photos_key(), content, STALE_GROW_TTL_SECONDS)
 
 
 async def redis_health() -> str:

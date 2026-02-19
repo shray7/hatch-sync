@@ -64,6 +64,14 @@
       />
     </section>
 
+    <section
+      v-if="rateLimitedStale"
+      class="rounded-xl border border-amber-900/40 border-slate-800 bg-amber-950/30 p-3"
+    >
+      <p class="text-sm text-amber-200/90">Rate limited; showing cached data.</p>
+      <p class="mt-1 text-xs text-slate-400">Hatch temporarily throttled the API. Refresh in a few minutes for fresh data.</p>
+    </section>
+
     <section v-if="dataError" class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70 p-4">
       <p class="text-sm text-rose-300">Dashboard data: {{ dataError }}</p>
       <p class="mt-2 text-xs text-slate-400">Check that the API is reachable and HATCH_EMAIL/HATCH_PASSWORD are set. First load can take up to 2 minutes if the API was idle.</p>
@@ -164,6 +172,7 @@ const photos = ref([]);
 const photosLoaded = ref(false);
 const photosError = ref(null);
 const failedImages = ref(new Set());
+const rateLimitedStale = ref(false);
 
 function photoUrl(photo) {
   if (!photo?.photoKey || !photo?.babyId) return null;
@@ -400,7 +409,9 @@ onMounted(async () => {
   ]);
 
   if (dataResult.status === "fulfilled") {
-    raw.value = dataResult.value;
+    const data = dataResult.value;
+    raw.value = data;
+    if (data?.rateLimitedStale) rateLimitedStale.value = true;
   } else {
     const e = dataResult.reason;
     const detail = e.response?.data?.detail ?? e.message;
@@ -410,6 +421,7 @@ onMounted(async () => {
 
   if (photoResult.status === "fulfilled") {
     const photoData = photoResult.value;
+    if (photoData?.rateLimitedStale) rateLimitedStale.value = true;
     const list = photoData?.photos ?? photoData?.payload?.photos ?? [];
     photos.value = Array.isArray(list) ? list : [];
   } else {

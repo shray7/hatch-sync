@@ -4,6 +4,7 @@ Uses data.hatchbaby.com; same credentials as Hatch Rest.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -11,25 +12,54 @@ import aiohttp
 
 API_URL = "https://data.hatchbaby.com"
 
+# On 429 we retry once after this delay (or Retry-After if present, capped)
+RATE_LIMIT_RETRY_DELAY_MIN = 30
+RATE_LIMIT_RETRY_DELAY_MAX = 120
+
 
 async def login(session: aiohttp.ClientSession, email: str, password: str) -> dict[str, Any]:
-    """Login and return the full response (token, payload with babies, etc.)."""
+    """Login and return the full response (token, payload with babies, etc.).
+    On 429 rate limit, retries once after a short backoff (or Retry-After if provided).
+    """
     url = f"{API_URL}/public/v1/login"
-    async with session.post(url, json={"email": email, "password": password}) as resp:
-        if resp.status == 429:
-            raise RuntimeError("Hatch rate limit (429); try again in a few minutes.")
-        text = await resp.text()
-        if "application/json" not in (resp.content_type or ""):
-            raise RuntimeError(
-                f"Hatch returned {resp.status} ({resp.content_type}); try again later."
-            )
-        try:
-            data = json.loads(text)
-        except ValueError:
-            raise RuntimeError(f"Hatch returned non-JSON (status {resp.status}); try again later.")
-    if data.get("status") != "success":
-        raise RuntimeError(f"Login failed: {data.get('message', 'unknown')}")
-    return data
+    payload = {"email": email, "password": password}
+
+    async def do_login() -> tuple[dict[str, Any] | None, int | None]:
+        async with session.post(url, json=payload) as resp:
+            if resp.status == 429:
+                retry_after: int | None = None
+                try:
+                    ra = resp.headers.get("Retry-After")
+                    if ra is not None:
+                        retry_after = int(ra)
+                except ValueError:
+                    pass
+                return None, retry_after
+            text = await resp.text()
+            if "application/json" not in (resp.content_type or ""):
+                raise RuntimeError(
+                    f"Hatch returned {resp.status} ({resp.content_type}); try again later."
+                )
+            try:
+                data = json.loads(text)
+            except ValueError:
+                raise RuntimeError(f"Hatch returned non-JSON (status {resp.status}); try again later.")
+            if data.get("status") != "success":
+                raise RuntimeError(f"Login failed: {data.get('message', 'unknown')}")
+            return data, None
+
+    data, retry_after = await do_login()
+    if data is not None:
+        return data
+
+    # 429: wait then retry once
+    delay = retry_after if retry_after is not None else 60
+    delay = max(RATE_LIMIT_RETRY_DELAY_MIN, min(RATE_LIMIT_RETRY_DELAY_MAX, delay))
+    await asyncio.sleep(delay)
+    data, _ = await do_login()
+    if data is not None:
+        return data
+    raise RuntimeError("Hatch rate limit (429); try again in a few minutes.")
 
 
 async def _fetch(
