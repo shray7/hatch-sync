@@ -38,7 +38,12 @@ from app.hatch_grow_service import (
     login as hatch_grow_login,
 )
 from app.sync import run_sync
-from app.photo_store import fetch_and_store_photo, get_photo_bytes, make_photo_key
+from app.photo_store import (
+    fetch_and_store_photo,
+    get_photo_bytes,
+    make_photo_key,
+    normalize_photo_key_for_lookup,
+)
 
 # Timeout for outbound requests to Hatch API so /grow/data and /grow/photos don't hang
 HATCH_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=50, connect=15)
@@ -315,30 +320,59 @@ async def photo_image(baby_id: int, key: str):
     - Look up the photo in cached /grow/photos data for this baby to get its URL.
     - Download once from Hatch, store in Blob, and stream back to the client.
     """
-    # 1. Try Blob first
+    key_normalized = normalize_photo_key_for_lookup(key)
+    log = logging.getLogger(__name__)
+
+    # 1. Try Blob first (try raw key then normalized key for backwards compatibility)
     data = await get_photo_bytes(key)
+    if data is None and key_normalized != key:
+        data = await get_photo_bytes(key_normalized)
     if data is not None:
         return Response(content=data, media_type="image/jpeg")
 
     # 2. Fallback: try to find the photo URL from cached photos metadata
     cached_photos = await get_cached_photos(baby_id)
     if not cached_photos:
-        raise HTTPException(status_code=404, detail="Photo not found")
+        # Refill cache from Hatch so direct image links work without visiting /grow/photos first
+        email = os.environ.get("HATCH_EMAIL")
+        password = os.environ.get("HATCH_PASSWORD")
+        if email and password:
+            try:
+                async with aiohttp.ClientSession(timeout=HATCH_HTTP_TIMEOUT) as session:
+                    login_data = await _get_login_or_fetch(session, email, password)
+                    token = login_data["token"]
+                    photos = await fetch_photos(session, token, baby_id)
+                    if photos:
+                        await set_cached_photos(baby_id, photos)
+                        cached_photos = photos
+            except Exception as e:
+                log.warning("photos/image: failed to refill cache for baby_id=%s: %s", baby_id, e)
+        if not cached_photos:
+            log.warning("photos/image: no cached photos for baby_id=%s key=%s", baby_id, key)
+            raise HTTPException(status_code=404, detail="Photo not found")
 
     entry = None
     for p in cached_photos:
-        if make_photo_key(baby_id, p) == key:
+        p_key = make_photo_key(baby_id, p)
+        if p_key == key or p_key == key_normalized:
             entry = p
             break
     if not entry:
+        log.warning(
+            "photos/image: no matching photo for baby_id=%s key=%s (tried normalized=%s)",
+            baby_id,
+            key,
+            key_normalized,
+        )
         raise HTTPException(status_code=404, detail="Photo not found")
 
     url = entry.get("cutDownloadUrl") or entry.get("downloadUrl") or ""
     if not url:
         raise HTTPException(status_code=404, detail="Photo URL not available")
 
-    data = await fetch_and_store_photo(url, key)
+    data = await fetch_and_store_photo(url, key_normalized)
     if data is None:
+        log.warning("photos/image: failed to fetch from Hatch for baby_id=%s key=%s", baby_id, key)
         raise HTTPException(status_code=502, detail="Failed to fetch photo from Hatch")
     return Response(content=data, media_type="image/jpeg")
 

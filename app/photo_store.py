@@ -9,21 +9,49 @@ import aiohttp
 from app.azure_blob import download_blob, upload_blob
 
 
+def _normalize_photo_timestamp(raw: str) -> str:
+    """
+    Normalize a createDate/weightDate string to a safe key segment: YYYY-MM-DDTHH-MM-SS.
+    Strips fractional seconds and 'Z' so keys are consistent regardless of API format.
+    """
+    ts = (raw or "").strip().replace("Z", "")
+    # Drop fractional seconds so "2026-02-17T23:16:08.000" -> "2026-02-17T23:16:08"
+    if "." in ts:
+        ts = ts.split(".")[0]
+    ts = ts.replace("T", " ").strip()
+    if not ts:
+        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    return ts.replace(" ", "T").replace(":", "-")
+
+
 def make_photo_key(baby_id: int | str, entry: dict[str, Any]) -> str:
     """
     Build a stable blob key for a photo entry.
 
     Uses baby_id and the photo's createDate (or weightDate) as an identifier so we can
-    find the same photo again when backfilling.
+    find the same photo again when backfilling. Timestamp is normalized (no fractional
+    seconds) so keys match regardless of Hatch API format.
     """
     raw = entry.get("createDate") or entry.get("weightDate") or ""
-    # Normalize to date string (YYYY-MM-DD) plus full timestamp for uniqueness
-    ts = (raw or "").strip().replace("T", " ").replace("Z", "")
-    # Fallback: use current time if missing
-    if not ts:
-        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    safe_ts = ts.replace(" ", "T").replace(":", "-")
+    safe_ts = _normalize_photo_timestamp(raw)
     return f"baby/{baby_id}/photos/{safe_ts}.jpg"
+
+
+def normalize_photo_key_for_lookup(key: str) -> str:
+    """
+    Normalize a photo key for lookup so keys with/without fractional seconds match.
+    e.g. baby/123/photos/2026-02-17T23-16-08.000.jpg -> baby/123/photos/2026-02-17T23-16-08.jpg
+    """
+    if not key or ".jpg" not in key:
+        return key
+    prefix, ext = key.rsplit(".", 1)
+    # Strip fractional seconds in the timestamp segment (last path segment before .jpg)
+    if "/" in prefix:
+        path, ts = prefix.rsplit("/", 1)
+        if "." in ts:
+            ts = ts.split(".")[0]
+        return f"{path}/{ts}.{ext}"
+    return key
 
 
 async def fetch_and_store_photo(url: str, key: str, timeout_seconds: float = 15.0) -> Optional[bytes]:
