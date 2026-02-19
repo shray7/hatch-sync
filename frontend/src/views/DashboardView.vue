@@ -1,32 +1,27 @@
 <template>
-  <div class="flex w-full flex-col gap-4">
-    <section>
-      <h1 class="text-xl font-semibold tracking-tight text-rose-200/90 md:text-2xl">
+  <div class="flex w-full flex-col gap-6 md:gap-8">
+    <section class="border-b border-slate-700/50 pb-6">
+      <h1 class="text-2xl font-semibold tracking-tight text-slate-100 md:text-3xl">
         Dashboard
       </h1>
-      <p class="mt-1 text-sm text-slate-400">
-        Overview of diapers, feedings, sleep and weight over the last 7 days.
+      <p class="mt-2 text-sm text-slate-400 md:text-base">
+        Overview of diapers, feedings, and weight over the last 7 days.
       </p>
     </section>
 
     <section
       v-if="loaded && raw"
-      class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
+      class="grid grid-cols-1 gap-4 sm:grid-cols-3"
     >
       <StatCard
         label="Diapers today"
         :value="todayCounts.diapers"
-        :sub="`Last 7 days avg: ${sevenDayAverages.diapers.toFixed(1)}`"
+        :sub="`7-day avg: ${sevenDayAverages.diapers.toFixed(1)}`"
       />
       <StatCard
         label="Feedings today"
         :value="todayCounts.feedings"
-        :sub="`Last 7 days avg: ${sevenDayAverages.feedings.toFixed(1)}`"
-      />
-      <StatCard
-        label="Total sleep today (h)"
-        :value="todaySleepHours.toFixed(1)"
-        :sub="`Last 7 days avg: ${sevenDayAverages.sleepHours.toFixed(1)}h`"
+        :sub="`7-day avg: ${sevenDayAverages.feedings.toFixed(1)}`"
       />
       <StatCard
         label="Last weight"
@@ -37,7 +32,7 @@
 
     <section
       v-if="loaded && raw"
-      class="grid grid-cols-1 gap-4 md:grid-cols-2"
+      class="grid grid-cols-1 gap-6 lg:grid-cols-2"
     >
       <TimeSeriesChart
         title="Diapers per day (last 14 days)"
@@ -51,12 +46,7 @@
       />
     </section>
 
-    <section v-if="loaded && raw" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <TimeSeriesChart
-        title="Total sleep per day (hours)"
-        :labels="sleepPerDay.labels"
-        :data="sleepPerDay.values"
-      />
+    <section v-if="loaded && raw && weightOverTime.labels.length > 0" class="max-w-2xl">
       <TimeSeriesChart
         title="Weight over time (lb)"
         :labels="weightOverTime.labels"
@@ -66,27 +56,28 @@
 
     <section
       v-if="rateLimitedStale"
-      class="rounded-xl border border-amber-900/40 border-slate-800 bg-amber-950/30 p-3"
+      class="rounded-xl border border-amber-800/50 bg-amber-950/20 px-4 py-3"
     >
-      <p class="text-sm text-amber-200/90">Rate limited; showing cached data.</p>
+      <p class="text-sm font-medium text-amber-200">Rate limited; showing cached data.</p>
       <p class="mt-1 text-xs text-slate-400">Hatch temporarily throttled the API. Refresh in a few minutes for fresh data.</p>
     </section>
 
-    <section v-if="dataError" class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70 p-4">
-      <p class="text-sm text-rose-300">Dashboard data: {{ dataError }}</p>
+    <section v-if="dataError" class="rounded-xl border border-rose-900/40 bg-slate-900/50 px-4 py-4">
+      <p class="text-sm font-medium text-rose-300">Dashboard data: {{ dataError }}</p>
       <p class="mt-2 text-xs text-slate-400">Check that the API is reachable and HATCH_EMAIL/HATCH_PASSWORD are set. First load can take up to 2 minutes if the API was idle.</p>
     </section>
 
-    <section v-else-if="!loaded" class="flex flex-col items-center justify-center gap-2 py-16">
+    <section v-else-if="!loaded" class="flex flex-col items-center justify-center gap-2 py-20">
+      <div class="h-8 w-8 animate-spin rounded-full border-2 border-slate-600 border-t-rose-400" />
       <p class="text-sm text-slate-400">Loading live data…</p>
-      <p class="text-xs text-slate-500">First load can take up to 2 minutes; please wait.</p>
+      <p class="text-xs text-slate-500">First load can take up to 2 minutes.</p>
     </section>
 
-    <section class="mt-6">
-      <h2 class="text-lg font-semibold tracking-tight text-rose-200/90 md:text-xl">
+    <section class="border-t border-slate-700/50 pt-8">
+      <h2 class="text-xl font-semibold tracking-tight text-slate-100 md:text-2xl">
         Media (last 7 days)
       </h2>
-      <p class="mt-1 text-sm text-slate-400">
+      <p class="mt-2 text-sm text-slate-400">
         Recent photos and videos from Hatch Grow and uploads.
       </p>
     </section>
@@ -103,12 +94,12 @@
 
     <section
       v-else-if="photosLoaded && photosLast7Days.length > 0"
-      class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:gap-4"
+      class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:gap-5"
     >
       <div
         v-for="photo in photosLast7Days"
         :key="photo.createDate + (photoUrl(photo) || '')"
-        class="flex flex-col overflow-hidden rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70"
+        class="flex flex-col overflow-hidden rounded-xl border border-slate-700/50 bg-slate-800/40 shadow-lg transition hover:border-slate-600/60"
       >
         <a
           v-if="photoUrl(photo) && !isVideo(photo)"
@@ -159,7 +150,7 @@
         >
           No preview URL
         </div>
-        <div class="px-2 py-2 text-xs text-slate-400">
+        <div class="px-3 py-2 text-xs text-slate-400">
           {{ formatPhotoDate(photo.createDate) }}
         </div>
       </div>
@@ -167,13 +158,14 @@
 
     <section
       v-else-if="photosLoaded && photosLast7Days.length === 0"
-      class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70 p-8 text-center"
+      class="rounded-xl border border-slate-700/50 bg-slate-800/30 px-6 py-12 text-center"
     >
-      <p class="text-sm text-slate-400">No photos in the last 7 days.</p>
+      <p class="text-sm text-slate-400">No photos or videos in the last 7 days.</p>
     </section>
 
-    <section v-if="!photosLoaded && !photosError" class="flex items-center justify-center py-8">
-      <p class="text-sm text-slate-400">Loading photos…</p>
+    <section v-if="!photosLoaded && !photosError" class="flex items-center justify-center gap-2 py-12">
+      <div class="h-5 w-5 animate-spin rounded-full border-2 border-slate-600 border-t-rose-400" />
+      <p class="text-sm text-slate-400">Loading media…</p>
     </section>
   </div>
 </template>
@@ -185,7 +177,6 @@ import {
   dateKey,
   formatDateTimePST,
   lastNDaysKeysPST,
-  toDate,
   todayKeyPST
 } from "../utils/pst";
 import { formatWeightLbsOz, gramsToLbs } from "../utils/weight";
@@ -215,12 +206,6 @@ function isVideo(photo) {
   return (photo?.mediaType || photo?.media_type || "").toLowerCase() === "video";
 }
 
-function hoursBetween(startStr, endStr) {
-  const start = toDate(startStr);
-  const end = toDate(endStr);
-  return (end - start) / (1000 * 60 * 60);
-}
-
 const todayKey = computed(() => todayKeyPST());
 
 const todayCounts = computed(() => {
@@ -235,32 +220,15 @@ const todayCounts = computed(() => {
   return { diapers: diapersToday, feedings: feedingsToday };
 });
 
-const todaySleepHours = computed(() => {
-  if (!raw.value) return 0;
-  const dKey = todayKey.value;
-  return raw.value.sleeps
-    .filter((s) => dateKey(s.startTime || s.createDate) === dKey)
-    .reduce(
-      (sum, s) =>
-        sum + hoursBetween(s.startTime || s.createDate, s.endTime || s.updateDate),
-      0
-    );
-});
-
 const sevenDayAverages = computed(() => {
   if (!raw.value) {
-    return { diapers: 0, feedings: 0, sleepHours: 0 };
+    return { diapers: 0, feedings: 0 };
   }
   const keys = lastNDaysKeysPST(7);
-  const perDay = {
-    diapers: {},
-    feedings: {},
-    sleepHours: {}
-  };
+  const perDay = { diapers: {}, feedings: {} };
   keys.forEach((k) => {
     perDay.diapers[k] = 0;
     perDay.feedings[k] = 0;
-    perDay.sleepHours[k] = 0;
   });
 
   raw.value.diapers.forEach((d) => {
@@ -271,22 +239,12 @@ const sevenDayAverages = computed(() => {
     const k = dateKey(f.startTime || f.createDate);
     if (k in perDay.feedings) perDay.feedings[k] += 1;
   });
-  raw.value.sleeps.forEach((s) => {
-    const k = dateKey(s.startTime || s.createDate);
-    if (k in perDay.sleepHours) {
-      perDay.sleepHours[k] += hoursBetween(
-        s.startTime || s.createDate,
-        s.endTime || s.updateDate
-      );
-    }
-  });
 
   const avg = (obj) =>
     keys.reduce((sum, k) => sum + (obj[k] || 0), 0) / keys.length || 0;
   return {
     diapers: avg(perDay.diapers),
-    feedings: avg(perDay.feedings),
-    sleepHours: avg(perDay.sleepHours)
+    feedings: avg(perDay.feedings)
   };
 });
 
@@ -317,26 +275,6 @@ const feedingsPerDay = computed(() => {
   return {
     labels: keys,
     values: keys.map((k) => counts[k] || 0)
-  };
-});
-
-const sleepPerDay = computed(() => {
-  if (!raw.value) return { labels: [], values: [] };
-  const keys = lastNDaysKeysPST(14);
-  const totals = {};
-  keys.forEach((k) => (totals[k] = 0));
-  raw.value.sleeps.forEach((s) => {
-    const k = dateKey(s.startTime || s.createDate);
-    if (k in totals) {
-      totals[k] += hoursBetween(
-        s.startTime || s.createDate,
-        s.endTime || s.updateDate
-      );
-    }
-  });
-  return {
-    labels: keys,
-    values: keys.map((k) => Number(totals[k]?.toFixed(2) || 0))
   };
 });
 
