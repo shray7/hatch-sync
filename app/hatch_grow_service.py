@@ -107,18 +107,6 @@ async def fetch_diapers(
     return [d for d in payload["diapers"] if not d.get("deleted")]
 
 
-async def fetch_sleep(
-    session: aiohttp.ClientSession, token: str, baby_id: int
-) -> list[dict[str, Any]]:
-    """Fetch sleep records for a baby."""
-    payload = await _fetch(
-        session, f"/service/app/sleep/v1/fetch/{baby_id}", token
-    )
-    if not payload or "sleeps" not in payload:
-        return []
-    return payload.get("sleeps") or []
-
-
 async def fetch_weight(
     session: aiohttp.ClientSession, token: str, baby_id: int
 ) -> list[dict[str, Any]]:

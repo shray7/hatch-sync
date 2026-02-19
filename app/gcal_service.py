@@ -43,7 +43,7 @@ def get_or_create_baby_calendar(service, baby_name: str, share_with_email: str) 
             _ensure_shared(service, cal_id, share_with_email)
             return cal_id
     # Create new calendar
-    body = {"summary": title, "description": "Hatch Grow sync: diapers, feedings, sleep, weight"}
+    body = {"summary": title, "description": "Hatch Grow sync: diapers, feedings, weight"}
     created = service.calendars().insert(body=body).execute()
     cal_id = created["id"]
     _ensure_shared(service, cal_id, share_with_email)
@@ -115,17 +115,6 @@ def feeding_to_event(entry: dict) -> tuple[str, str, datetime, datetime]:
     end_raw = entry.get("endTime")
     end = hatch_time_to_utc(parse_hatch_dt(end_raw)) if end_raw else add_minutes(dt, 30)
     return summary, description, dt, end
-
-
-def sleep_to_event(entry: dict) -> tuple[str, str, datetime, datetime]:
-    """(summary, description, start, end) for a sleep entry. Times in UTC."""
-    raw_start = entry.get("startTime") or entry.get("start") or entry.get("createDate") or ""
-    raw_end = entry.get("endTime") or entry.get("end") or entry.get("updateDate") or ""
-    start_dt = hatch_time_to_utc(parse_hatch_dt(raw_start))
-    end_dt = hatch_time_to_utc(parse_hatch_dt(raw_end)) if raw_end else add_minutes(start_dt, 60)
-    duration_min = int((end_dt - start_dt).total_seconds() / 60)
-    summary = f"Sleep - {duration_min}m"
-    return summary, "", start_dt, end_dt
 
 
 def _format_weight_lbs_oz(grams: float) -> str:

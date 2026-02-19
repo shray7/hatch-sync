@@ -189,33 +189,6 @@ async def upsert_diapers(baby_id: int, hatch_baby_id: int, items: list[dict]) ->
             )
 
 
-async def upsert_sleeps(baby_id: int, hatch_baby_id: int, items: list[dict]) -> None:
-    if not items:
-        return
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        for d in items:
-            hid = d.get("id")
-            if hid is None:
-                continue
-            start = _dt(d.get("startTime") or d.get("start") or d.get("createDate") or "")
-            end = _dt(d.get("endTime") or d.get("end") or d.get("updateDate") or "") if (d.get("endTime") or d.get("end") or d.get("updateDate")) else start
-            await conn.execute(
-                """
-                INSERT INTO sleeps (baby_id, hatch_id, start_time, end_time, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $3, $4)
-                ON CONFLICT (hatch_id) DO UPDATE SET
-                    start_time = EXCLUDED.start_time,
-                    end_time = EXCLUDED.end_time,
-                    updated_at = now()
-                """,
-                baby_id,
-                hid,
-                start,
-                end,
-            )
-
-
 async def upsert_weights(baby_id: int, hatch_baby_id: int, items: list[dict]) -> None:
     if not items:
         return
@@ -384,17 +357,6 @@ def _row_diaper(r, hatch_baby_id: int) -> dict:
     }
 
 
-def _row_sleep(r, hatch_baby_id: int) -> dict:
-    return {
-        "id": r["hatch_id"],
-        "babyId": hatch_baby_id,
-        "startTime": format_hatch_dt(r["start_time"]),
-        "endTime": format_hatch_dt(r["end_time"]),
-        "createDate": format_hatch_dt(r["created_at"]),
-        "updateDate": format_hatch_dt(r["updated_at"]),
-    }
-
-
 def _row_weight(r, hatch_baby_id: int) -> dict:
     return {
         "id": r["hatch_id"],
@@ -421,7 +383,7 @@ def _row_photo(r, hatch_baby_id: int) -> dict:
 async def get_grow_data() -> Optional[dict[str, Any]]:
     """
     Return { babies, feedings, diapers, sleeps, weights } in API shape.
-    Uses first baby (by id) for feedings/diapers/sleeps/weights. Returns None if DB not configured or empty.
+    Uses first baby (by id) for feedings/diapers/weights. Returns None if DB not configured or empty.
     """
     if not _pool:
         return None
@@ -442,10 +404,6 @@ async def get_grow_data() -> Optional[dict[str, Any]]:
                 "SELECT hatch_id, diaper_date, diaper_type, details, created_at, updated_at FROM diapers WHERE baby_id = $1 ORDER BY diaper_date",
                 first_baby_id,
             )
-            sleeps = await conn.fetch(
-                "SELECT hatch_id, start_time, end_time, created_at, updated_at FROM sleeps WHERE baby_id = $1 ORDER BY start_time",
-                first_baby_id,
-            )
             weights = await conn.fetch(
                 "SELECT hatch_id, weight_grams, weight_date, created_at, updated_at FROM weights WHERE baby_id = $1 ORDER BY weight_date",
                 first_baby_id,
@@ -454,7 +412,7 @@ async def get_grow_data() -> Optional[dict[str, Any]]:
                 "babies": babies,
                 "feedings": [_row_feeding(r, hatch_baby_id) for r in feedings],
                 "diapers": [_row_diaper(r, hatch_baby_id) for r in diapers],
-                "sleeps": [_row_sleep(r, hatch_baby_id) for r in sleeps],
+                "sleeps": [],
                 "weights": [_row_weight(r, hatch_baby_id) for r in weights],
             }
     except Exception as e:
@@ -528,17 +486,6 @@ async def get_unsynced_diapers_for_baby(baby_id: int, hatch_baby_id: int) -> lis
         return [(r["id"], _row_diaper(r, hatch_baby_id)) for r in rows]
 
 
-async def get_unsynced_sleeps_for_baby(baby_id: int, hatch_baby_id: int) -> list[tuple[int, dict]]:
-    if not _pool:
-        return []
-    async with _pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, hatch_id, start_time, end_time, created_at, updated_at FROM sleeps WHERE baby_id = $1 AND synced_to_calendar_at IS NULL ORDER BY start_time",
-            baby_id,
-        )
-        return [(r["id"], _row_sleep(r, hatch_baby_id)) for r in rows]
-
-
 async def get_unsynced_weights_for_baby(baby_id: int, hatch_baby_id: int) -> list[tuple[int, dict]]:
     if not _pool:
         return []
@@ -562,13 +509,6 @@ async def mark_diapers_synced(ids: list[int]) -> None:
         return
     async with _pool.acquire() as conn:
         await conn.execute("UPDATE diapers SET synced_to_calendar_at = now() WHERE id = ANY($1::int[])", ids)
-
-
-async def mark_sleeps_synced(ids: list[int]) -> None:
-    if not _pool or not ids:
-        return
-    async with _pool.acquire() as conn:
-        await conn.execute("UPDATE sleeps SET synced_to_calendar_at = now() WHERE id = ANY($1::int[])", ids)
 
 
 async def mark_weights_synced(ids: list[int]) -> None:

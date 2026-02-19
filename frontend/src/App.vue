@@ -17,7 +17,7 @@
               Hatch Grow Analytics
             </span>
             <span class="text-xs text-slate-400 leading-tight">
-              Uma's diapers, feedings, sleep, weight & photos
+              Uma's diapers, feedings, weight, photos & videos
             </span>
           </div>
         </div>
@@ -74,7 +74,6 @@ const links = [
   { to: "/", label: "Dashboard" },
   { to: "/feedings", label: "Feedings" },
   { to: "/diapers", label: "Diapers" },
-  { to: "/sleep", label: "Sleep" },
   { to: "/weight", label: "Weight" },
   { to: "/photos", label: "Photos" },
   { to: "/videos", label: "Videos" },

@@ -1,6 +1,6 @@
 """
 hatch-sync: FastAPI API for Hatch Rest devices using the unofficial hatch-rest-api library.
-Also syncs Hatch Grow data (diapers, feedings, sleep, weight) to Google Calendar.
+Also syncs Hatch Grow data (diapers, feedings, weight) to Google Calendar.
 """
 import asyncio
 import logging
@@ -46,7 +46,6 @@ from app.db import (
     upsert_feedings,
     upsert_google_refresh_token,
     upsert_photos,
-    upsert_sleeps,
     upsert_weights,
 )
 from app.hatch_service import (
@@ -60,7 +59,6 @@ from app.hatch_grow_service import (
     fetch_diapers,
     fetch_feedings,
     fetch_photos,
-    fetch_sleep,
     fetch_weight,
     login as hatch_grow_login,
 )
@@ -149,15 +147,13 @@ async def refresh_grow_cache() -> None:
                 except RuntimeError:
                     # DB not configured
                     return
-                diapers, feedings, sleeps, weights = await asyncio.gather(
+                diapers, feedings, weights = await asyncio.gather(
                     safe_fetch(fetch_diapers(session, token, hatch_baby_id), []),
                     safe_fetch(fetch_feedings(session, token, hatch_baby_id), []),
-                    safe_fetch(fetch_sleep(session, token, hatch_baby_id), []),
                     safe_fetch(fetch_weight(session, token, hatch_baby_id), []),
                 )
                 await upsert_feedings(internal_baby_id, hatch_baby_id, feedings)
                 await upsert_diapers(internal_baby_id, hatch_baby_id, diapers)
-                await upsert_sleeps(internal_baby_id, hatch_baby_id, sleeps)
                 await upsert_weights(internal_baby_id, hatch_baby_id, weights)
                 photos = await safe_fetch(fetch_photos(session, token, hatch_baby_id), [])
                 if photos:

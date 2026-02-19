@@ -13,11 +13,9 @@ from app.db import (
     get_babies_for_sync,
     get_unsynced_diapers_for_baby,
     get_unsynced_feedings_for_baby,
-    get_unsynced_sleeps_for_baby,
     get_unsynced_weights_for_baby,
     mark_diapers_synced,
     mark_feedings_synced,
-    mark_sleeps_synced,
     mark_weights_synced,
 )
 from app.gcal_service import (
@@ -26,7 +24,6 @@ from app.gcal_service import (
     feeding_to_event,
     get_calendar_service,
     get_or_create_baby_calendar,
-    sleep_to_event,
     weight_to_event,
 )
 
@@ -97,20 +94,6 @@ async def run_sync() -> dict:
                 summary["errors"].append(f"Feeding event {f.get('id')}: {e}")
         if feeding_ids:
             await mark_feedings_synced(feeding_ids)
-
-        # Sleeps
-        sleeps_list = await get_unsynced_sleeps_for_baby(internal_baby_id, hatch_baby_id)
-        sleep_ids = []
-        for row_id, s in sleeps_list:
-            try:
-                summy, desc, start, end = sleep_to_event(s)
-                create_event(service, cal_id, summy, desc, start, end)
-                summary["events_created"] += 1
-                sleep_ids.append(row_id)
-            except Exception as e:
-                summary["errors"].append(f"Sleep event {s.get('id')}: {e}")
-        if sleep_ids:
-            await mark_sleeps_synced(sleep_ids)
 
         # Weights
         weights_list = await get_unsynced_weights_for_baby(internal_baby_id, hatch_baby_id)
