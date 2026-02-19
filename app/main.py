@@ -114,13 +114,21 @@ async def refresh_grow_cache() -> None:
                 safe_fetch(fetch_sleep(session, token, baby_id), []),
                 safe_fetch(fetch_weight(session, token, baby_id), []),
             )
-            await set_cached_grow_data(
-                baby_id,
-                {"diapers": diapers, "feedings": feedings, "sleeps": sleeps, "weights": weights},
-            )
+            grow_bundle = {"diapers": diapers, "feedings": feedings, "sleeps": sleeps, "weights": weights}
+            await set_cached_grow_data(baby_id, grow_bundle)
+            await set_cached_stale_grow_data({"babies": babies, **grow_bundle})
+            # Warm photos cache too so first dashboard load gets data + photos from cache
+            photos = await safe_fetch(fetch_photos(session, token, baby_id), [])
+            if photos is not None:
+                await set_cached_photos(baby_id, photos)
+                enriched = [
+                    {**p, "photoKey": make_photo_key(baby_id, p), "babyId": baby_id}
+                    for p in photos
+                ]
+                await set_cached_stale_photos({"photos": enriched})
             logger.info(
-                "refresh_grow_cache: updated cache (diapers=%s feedings=%s sleeps=%s weights=%s)",
-                len(diapers), len(feedings), len(sleeps), len(weights),
+                "refresh_grow_cache: updated cache (diapers=%s feedings=%s sleeps=%s weights=%s photos=%s)",
+                len(diapers), len(feedings), len(sleeps), len(weights), len(photos),
             )
     except asyncio.TimeoutError:
         logger.warning("refresh_grow_cache: Hatch API timed out")
