@@ -37,7 +37,7 @@
         class="flex flex-col overflow-hidden rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70"
       >
         <a
-          v-if="photoUrl(photo) && !isVideo(photo)"
+          v-if="photoUrl(photo)"
           :href="photoUrl(photo)"
           target="_blank"
           rel="noopener noreferrer"
@@ -60,26 +60,6 @@
           </div>
         </a>
         <div
-          v-else-if="photoUrl(photo) && isVideo(photo)"
-          class="block aspect-square w-full overflow-hidden bg-slate-800"
-        >
-          <video
-            v-if="!failedImages.has(photo.createDate)"
-            :src="photoUrl(photo)"
-            class="h-full w-full object-cover"
-            controls
-            playsinline
-            preload="metadata"
-            @error="onImageError($event, photo)"
-          />
-          <div
-            v-else
-            class="h-full w-full flex flex-col items-center justify-center text-slate-400 text-xs p-2 gap-1 text-center"
-          >
-            <span>Video unavailable</span>
-          </div>
-        </div>
-        <div
           v-else
           class="aspect-square w-full bg-slate-800 flex items-center justify-center text-slate-500 text-xs p-2"
         >
@@ -92,7 +72,7 @@
     </section>
 
     <section v-if="loaded && sortedPhotos.length === 0" class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70 p-8 text-center">
-      <p class="text-sm text-slate-400">No daily photos yet. Add some in the Hatch Grow app.</p>
+      <p class="text-sm text-slate-400">No daily photos yet. Add some in the Hatch Grow app or upload from Admin.</p>
     </section>
 
     <section v-if="!loaded && !error" class="flex items-center justify-center py-16">
@@ -123,10 +103,6 @@ function photoUrl(photo) {
   return `${apiBase}/photos/image?${params.toString()}`;
 }
 
-function isVideo(photo) {
-  return (photo?.mediaType || photo?.media_type || "").toLowerCase() === "video";
-}
-
 function onImageError(event, photo) {
   if (photo?.createDate) failedImages.value.add(photo.createDate);
   failedImages.value = new Set(failedImages.value);
@@ -140,7 +116,7 @@ const is404 = computed(() => {
 });
 
 const sortedPhotos = computed(() => {
-  const list = [...photos.value];
+  const list = photos.value.filter((p) => (p?.mediaType || p?.media_type || "").toLowerCase() !== "video");
   list.sort((a, b) => new Date(b.createDate || 0) - new Date(a.createDate || 0));
   return list;
 });

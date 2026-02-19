@@ -5,6 +5,7 @@ import DiapersView from "./views/DiapersView.vue";
 import SleepView from "./views/SleepView.vue";
 import WeightView from "./views/WeightView.vue";
 import PhotosView from "./views/PhotosView.vue";
+import VideosView from "./views/VideosView.vue";
 import AdminView from "./views/AdminView.vue";
 
 const routes = [
@@ -14,6 +15,7 @@ const routes = [
   { path: "/sleep", name: "sleep", component: SleepView },
   { path: "/weight", name: "weight", component: WeightView },
   { path: "/photos", name: "photos", component: PhotosView },
+  { path: "/videos", name: "videos", component: VideosView },
   { path: "/admin", name: "admin", component: AdminView }
 ];
 

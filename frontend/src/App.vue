@@ -77,6 +77,7 @@ const links = [
   { to: "/sleep", label: "Sleep" },
   { to: "/weight", label: "Weight" },
   { to: "/photos", label: "Photos" },
+  { to: "/videos", label: "Videos" },
   { to: "/admin", label: "Admin" }
 ];
 </script>

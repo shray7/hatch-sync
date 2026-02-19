@@ -84,10 +84,10 @@
 
     <section class="mt-6">
       <h2 class="text-lg font-semibold tracking-tight text-rose-200/90 md:text-xl">
-        Photos (last 7 days)
+        Media (last 7 days)
       </h2>
       <p class="mt-1 text-sm text-slate-400">
-        Daily photos from Hatch Grow.
+        Recent photos and videos from Hatch Grow and uploads.
       </p>
     </section>
 
