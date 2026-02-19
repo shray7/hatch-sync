@@ -26,7 +26,15 @@ async def list_media_items(access_token: str, page_size: int = 50, page_token: s
             json=body,
             headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
         )
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        # Log full response body for easier debugging (e.g. insufficient scopes, API not enabled)
+        try:
+            logger.warning("Google Photos mediaItems:search error %s: %s", resp.status_code, resp.text)
+        except Exception:
+            logger.warning("Google Photos mediaItems:search error: %s", e)
+        raise
     return resp.json()
 
 

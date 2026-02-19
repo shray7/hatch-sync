@@ -12,6 +12,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import aiohttp
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pydantic import BaseModel
 
@@ -55,6 +56,12 @@ from app.hatch_service import (
     set_audio_track,
     set_volume,
 )
+from app.google_photos import (
+    batch_get_media_items,
+    download_media_bytes,
+    get_download_url,
+    list_media_items,
+)
 from app.hatch_grow_service import (
     fetch_diapers,
     fetch_feedings,
@@ -63,12 +70,6 @@ from app.hatch_grow_service import (
     login as hatch_grow_login,
 )
 from app.sync import run_sync
-from app.google_photos import (
-    batch_get_media_items,
-    get_download_url,
-    download_media_bytes,
-    list_media_items,
-)
 from app.photo_store import (
     fetch_and_store_photo,
     get_photo_bytes,
@@ -461,6 +462,16 @@ async def admin_google_photos_list(
     try:
         data = await list_media_items(access, page_size=page_size, page_token=page_token)
         return data
+    except httpx.HTTPStatusError as e:
+        # Surface the underlying Google Photos error message to the client.
+        detail = str(e)
+        try:
+            err_json = e.response.json()
+            detail = err_json.get("error", {}).get("message") or detail
+        except Exception:
+            pass
+        logger.warning("admin_google_photos_list: Google Photos API failed: %s", detail)
+        raise HTTPException(status_code=e.response.status_code, detail=f"Google Photos API error: {detail}")
     except Exception as e:
         logger.warning("admin_google_photos_list: API failed: %s", e)
         raise HTTPException(status_code=502, detail=str(e))
