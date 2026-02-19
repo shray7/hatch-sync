@@ -401,35 +401,34 @@ function formatPhotoDate(dateStr) {
   });
 }
 
-onMounted(async () => {
-  // Load data and photos in parallel so stats appear as soon as /grow/data returns
-  const [dataResult, photoResult] = await Promise.allSettled([
-    fetchGrowData(),
-    fetchPhotos()
-  ]);
+onMounted(() => {
+  // Load data and photos in parallel; update UI as each returns (don't wait for both)
+  fetchGrowData()
+    .then((data) => {
+      raw.value = data;
+      if (data?.rateLimitedStale) rateLimitedStale.value = true;
+    })
+    .catch((e) => {
+      const detail = e.response?.data?.detail ?? e.message;
+      dataError.value = typeof detail === "string" ? detail : "Failed to load data.";
+    })
+    .finally(() => {
+      loaded.value = true;
+    });
 
-  if (dataResult.status === "fulfilled") {
-    const data = dataResult.value;
-    raw.value = data;
-    if (data?.rateLimitedStale) rateLimitedStale.value = true;
-  } else {
-    const e = dataResult.reason;
-    const detail = e.response?.data?.detail ?? e.message;
-    dataError.value = typeof detail === "string" ? detail : "Failed to load data.";
-  }
-  loaded.value = true;
-
-  if (photoResult.status === "fulfilled") {
-    const photoData = photoResult.value;
-    if (photoData?.rateLimitedStale) rateLimitedStale.value = true;
-    const list = photoData?.photos ?? photoData?.payload?.photos ?? [];
-    photos.value = Array.isArray(list) ? list : [];
-  } else {
-    const e = photoResult.reason;
-    const detail = e.response?.data?.detail ?? e.message;
-    photosError.value = typeof detail === "string" ? detail : "Failed to load photos.";
-  }
-  photosLoaded.value = true;
+  fetchPhotos()
+    .then((photoData) => {
+      if (photoData?.rateLimitedStale) rateLimitedStale.value = true;
+      const list = photoData?.photos ?? photoData?.payload?.photos ?? [];
+      photos.value = Array.isArray(list) ? list : [];
+    })
+    .catch((e) => {
+      const detail = e.response?.data?.detail ?? e.message;
+      photosError.value = typeof detail === "string" ? detail : "Failed to load photos.";
+    })
+    .finally(() => {
+      photosLoaded.value = true;
+    });
 });
 </script>
 
