@@ -9,6 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlparse
 
 import aiohttp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -322,12 +323,24 @@ def require_admin(request: Request) -> str:
     return get_session_email(request)
 
 
+def _oauth_redirect_base(request: Request) -> str:
+    """Base URL for OAuth redirect_uri. Prefer API_BASE_URL; else request URL forced to https when not localhost (e.g. behind Azure TLS termination)."""
+    base = os.environ.get("API_BASE_URL", "").strip()
+    if base:
+        return base.rstrip("/")
+    url = str(request.base_url).rstrip("/")
+    parsed = urlparse(url)
+    if parsed.scheme == "http" and "localhost" not in (parsed.hostname or "") and parsed.hostname != "127.0.0.1":
+        return f"https://{parsed.hostname or parsed.netloc}"
+    return url
+
+
 @app.get("/auth/google")
 async def auth_google(request: Request, next_url: str = Query("", alias="next")):
     """Redirect to Google OAuth. Optional 'next' is passed through state to redirect after login."""
     try:
-        # redirect_uri must be the backend callback URL
-        base = os.environ.get("API_BASE_URL", "").strip() or str(request.base_url).rstrip("/")
+        # redirect_uri must be the backend callback URL (https in production)
+        base = _oauth_redirect_base(request)
         redirect_uri = f"{base}/auth/callback"
         state = next_url if next_url else ""
         url = build_google_auth_url(redirect_uri, state=state or None)
@@ -344,7 +357,7 @@ async def auth_callback(
     state: str = Query(""),
 ):
     """Exchange code for tokens, verify, set session cookie, redirect to frontend."""
-    base = os.environ.get("API_BASE_URL", "").strip() or str(request.base_url).rstrip("/")
+    base = _oauth_redirect_base(request)
     redirect_uri = f"{base}/auth/callback"
     try:
         tokens = await exchange_code_for_tokens(code, redirect_uri)
