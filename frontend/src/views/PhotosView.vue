@@ -84,6 +84,7 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { fetchPhotos } from "../api/grow";
+import { formatDateTimePST } from "../utils/pst";
 
 const photos = ref([]);
 const loaded = ref(false);
@@ -121,15 +122,7 @@ const sortedPhotos = computed(() => {
 });
 
 function formatDate(dateStr) {
-  if (!dateStr) return "";
-  const d = new Date(dateStr.replace(" ", "T"));
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
+  return formatDateTimePST(dateStr);
 }
 
 onMounted(async () => {

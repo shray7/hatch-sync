@@ -6,6 +6,7 @@ A small **FastAPI** API that talks to **Hatch Rest** devices (sound machines) us
 
 - Python 3.10+
 - A Hatch account with at least one Rest (or Rest Mini / Rest+) device
+- **PostgreSQL** for storing Grow data (diapers, feedings, sleep, weight, photos). The app runs without it but `/grow/data` and `/grow/photos` will return empty until a DB is configured and the background job has run.
 - For Grow → Calendar sync: a Google Cloud service account with Calendar API enabled
 
 ## Setup
@@ -17,7 +18,18 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 # Edit .env: HATCH_EMAIL, HATCH_PASSWORD; for sync add GOOGLE_SERVICE_ACCOUNT_FILE, GOOGLE_CALENDAR_SHARE_EMAIL
+# For Grow data: set DATABASE_URL to your PostgreSQL connection string (e.g. postgresql://user:pass@localhost:5432/hatch)
 ```
+
+### PostgreSQL (Grow data)
+
+Grow data (and calendar sync state) is stored in PostgreSQL. Set `DATABASE_URL` in `.env` (e.g. `postgresql://user:pass@localhost:5432/hatch`). On startup the app runs migrations from `migrations/001_initial.sql` to create the tables. You can also run them manually:
+
+```bash
+psql "$DATABASE_URL" -f migrations/001_initial.sql
+```
+
+The background job (every 15 minutes) fetches from the Hatch Grow API and upserts into the DB; `/grow/data` and `/grow/photos` read only from the database.
 
 ### Google Calendar sync (optional)
 
@@ -28,7 +40,7 @@ cp .env.example .env
 5. In `.env` set:
    - `GOOGLE_SERVICE_ACCOUNT_FILE=service_account.json`
    - `GOOGLE_CALENDAR_SHARE_EMAIL=your@gmail.com` (the calendar will be shared with this address so it appears in your Google Calendar).
-   - Optional: `HATCH_TIMEZONE=America/Los_Angeles` (or your IANA timezone) so synced events show at the correct local time; if unset, Hatch times are treated as UTC.
+   - All times are interpreted and displayed in **PST** (America/Los_Angeles) by default. Set `HATCH_TIMEZONE` to another IANA timezone (e.g. `America/New_York`) to use that for synced events and API responses.
 
 On first sync the app creates a calendar named “{Baby name} - Baby Tracker” and shares it with that email.
 
@@ -61,4 +73,4 @@ To deploy the backend to **Azure Container Apps** and the frontend to **GitHub P
 
 - The underlying **hatch-rest-api** is reverse-engineered and unsupported by Hatch; it can break if Hatch change their cloud API.
 - Credentials are read from `.env`. Do not commit `.env` or `service_account.json`.
-- Sync state is stored in `sync_state.json` so only new diapers/feedings/sleep/weight entries become calendar events.
+- Sync state is stored in the database (`synced_to_calendar_at` on each row) so only new diapers/feedings/sleep/weight entries become calendar events.

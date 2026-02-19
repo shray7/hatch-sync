@@ -75,30 +75,19 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { fetchGrowData } from "../api/grow";
+import {
+  dateKey,
+  formatDatePST,
+  formatTimePST,
+  lastNDaysKeysPST,
+  toDate
+} from "../utils/pst";
 import TimeSeriesChart from "../components/TimeSeriesChart.vue";
 
 const raw = ref(null);
 const loaded = ref(false);
 
-function dateKey(dateStr) {
-  return dateStr.slice(0, 10);
-}
-
-function toDate(dateStr) {
-  return new Date(dateStr.replace(" ", "T"));
-}
-
-const lastNDaysKeys = (n) => {
-  const keys = [];
-  const now = new Date();
-  for (let i = 0; i < n; i++) {
-    const d = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i)
-    );
-    keys.push(d.toISOString().slice(0, 10));
-  }
-  return keys.reverse();
-};
+const lastNDaysKeys = (n) => lastNDaysKeysPST(n);
 
 const diapersPerDay = computed(() => {
   if (!raw.value) return { labels: [], values: [] };
@@ -152,11 +141,11 @@ const recentDiapers = computed(() => {
       toDate(a.diaperDate || a.createDate)
   );
   return sorted.slice(0, 30).map((d) => {
-    const dt = toDate(d.diaperDate || d.createDate);
+    const dateStr = d.diaperDate || d.createDate;
     return {
       id: d.id,
-      date: dt.toISOString().slice(0, 10),
-      time: dt.toTimeString().slice(0, 5),
+      date: formatDatePST(dateStr),
+      time: formatTimePST(dateStr),
       type: d.diaperType || "-",
       details: d.details || ""
     };

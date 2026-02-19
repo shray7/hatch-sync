@@ -20,14 +20,16 @@ missing=()
 [ -z "${HATCH_EMAIL:-}" ] && missing+=(HATCH_EMAIL)
 [ -z "${HATCH_PASSWORD:-}" ] && missing+=(HATCH_PASSWORD)
 [ -z "${GOOGLE_CALENDAR_SHARE_EMAIL:-}" ] && missing+=(GOOGLE_CALENDAR_SHARE_EMAIL)
-[ -z "${AZURE_BLOB_CONNECTION_STRING:-}" ] && missing+=(AZURE_BLOB_CONNECTION_STRING)
-[ -z "${AZURE_BLOB_CONTAINER:-}" ] && missing+=(AZURE_BLOB_CONTAINER)
 
 if [ ${#missing[@]} -gt 0 ]; then
   echo "Missing required environment variables: ${missing[*]}"
   echo "Example: HATCH_EMAIL=you@email.com HATCH_PASSWORD=secret GOOGLE_CALENDAR_SHARE_EMAIL=you@gmail.com $0"
   exit 1
 fi
+
+# Optional: Azure Blob for photo storage (if unset, use placeholder so secret set succeeds; replace later in portal)
+AZURE_BLOB_CONNECTION_STRING="${AZURE_BLOB_CONNECTION_STRING:-DefaultEndpointsProtocol=https;AccountName=placeholder;AccountKey=placeholder;EndpointSuffix=core.windows.net}"
+AZURE_BLOB_CONTAINER="${AZURE_BLOB_CONTAINER:-hatch-photos}"
 
 echo "Getting Redis URL from Container Apps environment..."
 ENV_DEFAULT_DOMAIN=$(az containerapp env show \
@@ -37,17 +39,24 @@ ENV_DEFAULT_DOMAIN=$(az containerapp env show \
 REDIS_URL="redis://${REDIS_APP_NAME}.internal.${ENV_DEFAULT_DOMAIN}:6379/0"
 echo "Redis URL: $REDIS_URL"
 
-echo "Setting secrets on Container App '$APP_NAME' in resource group '$RESOURCE_GROUP'..."
+# Build secrets list (required + optional DATABASE_URL)
+SECRETS_ARR=(
+  "redis-url=$REDIS_URL"
+  "hatch-email=$HATCH_EMAIL"
+  "hatch-password=$HATCH_PASSWORD"
+  "google-calendar-share-email=$GOOGLE_CALENDAR_SHARE_EMAIL"
+  "azure-blob-connection-string=$AZURE_BLOB_CONNECTION_STRING"
+)
+if [ -n "${DATABASE_URL:-}" ]; then
+  SECRETS_ARR+=("database-url=$DATABASE_URL")
+  echo "Including DATABASE_URL in secrets (Grow data stored in PostgreSQL)."
+fi
 
+echo "Setting secrets on Container App '$APP_NAME' in resource group '$RESOURCE_GROUP'..."
 az containerapp secret set \
   --name "$APP_NAME" \
   --resource-group "$RESOURCE_GROUP" \
-  --secrets \
-    redis-url="$REDIS_URL" \
-    hatch-email="$HATCH_EMAIL" \
-    hatch-password="$HATCH_PASSWORD" \
-    google-calendar-share-email="$GOOGLE_CALENDAR_SHARE_EMAIL" \
-    azure-blob-connection-string="$AZURE_BLOB_CONNECTION_STRING"
+  --secrets "${SECRETS_ARR[@]}"
 
 # Optional: timezone for calendar event times (e.g. America/Los_Angeles)
 # Optional: minutes between cache refresh jobs (default 15)
@@ -63,9 +72,14 @@ env_vars=(
   "HATCH_PASSWORD=secretref:hatch-password"
   "GOOGLE_CALENDAR_SHARE_EMAIL=secretref:google-calendar-share-email"
 )
+if [ -n "${DATABASE_URL:-}" ]; then
+  env_vars+=("DATABASE_URL=secretref:database-url")
+fi
 
 if [ -n "${HATCH_TIMEZONE:-}" ]; then
   env_vars+=("HATCH_TIMEZONE=$HATCH_TIMEZONE")
+elif [ -n "${DATABASE_URL:-}" ]; then
+  env_vars+=("HATCH_TIMEZONE=America/Los_Angeles")
 fi
 
 if [ -n "${HATCH_CACHE_REFRESH_MINUTES:-}" ]; then

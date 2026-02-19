@@ -28,4 +28,4 @@ Do not commit `.env`, `service_account.json`, or the AZURE_CREDENTIALS JSON.
 
 1. Enable **GitHub Pages**: Settings → Pages → Source = **GitHub Actions**.
 2. Push to `main` (or run the Backend and Frontend workflows manually) to build and deploy.
-3. Set Container App secrets for Hatch + Google so the API can sync: run `./scripts/azure-set-secrets.sh` with `HATCH_EMAIL`, `HATCH_PASSWORD`, and `GOOGLE_CALENDAR_SHARE_EMAIL` set in the environment.
+3. Set Container App secrets for Hatch + Google (and optionally PostgreSQL) so the API can sync: run `./scripts/azure-set-secrets.sh` with `HATCH_EMAIL`, `HATCH_PASSWORD`, `GOOGLE_CALENDAR_SHARE_EMAIL`, and the other required env vars (see script). If you created PostgreSQL with `./scripts/azure-setup-postgres.sh`, also set `DATABASE_URL` in the environment when running set-secrets so Grow data is stored in the database.

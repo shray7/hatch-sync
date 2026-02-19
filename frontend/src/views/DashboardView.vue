@@ -161,6 +161,13 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { fetchGrowData, fetchPhotos } from "../api/grow";
+import {
+  dateKey,
+  formatDateTimePST,
+  lastNDaysKeysPST,
+  toDate,
+  todayKeyPST
+} from "../utils/pst";
 import { formatWeightLbsOz, gramsToLbs } from "../utils/weight";
 import StatCard from "../components/StatCard.vue";
 import TimeSeriesChart from "../components/TimeSeriesChart.vue";
@@ -184,40 +191,13 @@ function photoUrl(photo) {
   return `${apiBase}/photos/image?${params.toString()}`;
 }
 
-function dateKey(dateStr) {
-  return dateStr.slice(0, 10);
-}
-
-function toDate(dateStr) {
-  return new Date(dateStr.replace(" ", "T"));
-}
-
 function hoursBetween(startStr, endStr) {
   const start = toDate(startStr);
   const end = toDate(endStr);
   return (end - start) / (1000 * 60 * 60);
 }
 
-// Use local date so "today" and per-day stats match the user's timezone (and Hatch's local-time dates)
-function localDateKey(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-const todayKey = computed(() => localDateKey(new Date()));
-
-const lastNDaysKeys = (n) => {
-  const keys = [];
-  const now = new Date();
-  for (let i = 0; i < n; i++) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    keys.push(localDateKey(d));
-  }
-  return keys.reverse();
-};
+const todayKey = computed(() => todayKeyPST());
 
 const todayCounts = computed(() => {
   if (!raw.value) return { diapers: 0, feedings: 0 };
@@ -247,7 +227,7 @@ const sevenDayAverages = computed(() => {
   if (!raw.value) {
     return { diapers: 0, feedings: 0, sleepHours: 0 };
   }
-  const keys = lastNDaysKeys(7);
+  const keys = lastNDaysKeysPST(7);
   const perDay = {
     diapers: {},
     feedings: {},
@@ -288,7 +268,7 @@ const sevenDayAverages = computed(() => {
 
 const diapersPerDay = computed(() => {
   if (!raw.value) return { labels: [], values: [] };
-  const keys = lastNDaysKeys(14);
+  const keys = lastNDaysKeysPST(14);
   const counts = {};
   keys.forEach((k) => (counts[k] = 0));
   raw.value.diapers.forEach((d) => {
@@ -303,7 +283,7 @@ const diapersPerDay = computed(() => {
 
 const feedingsPerDay = computed(() => {
   if (!raw.value) return { labels: [], values: [] };
-  const keys = lastNDaysKeys(14);
+  const keys = lastNDaysKeysPST(14);
   const counts = {};
   keys.forEach((k) => (counts[k] = 0));
   raw.value.feedings.forEach((f) => {
@@ -318,7 +298,7 @@ const feedingsPerDay = computed(() => {
 
 const sleepPerDay = computed(() => {
   if (!raw.value) return { labels: [], values: [] };
-  const keys = lastNDaysKeys(14);
+  const keys = lastNDaysKeysPST(14);
   const totals = {};
   keys.forEach((k) => (totals[k] = 0));
   raw.value.sleeps.forEach((s) => {
@@ -375,7 +355,7 @@ const lastWeightDate = computed(() => {
   return dateKey(d);
 });
 
-const sevenDayKeysSet = computed(() => new Set(lastNDaysKeys(7)));
+const sevenDayKeysSet = computed(() => new Set(lastNDaysKeysPST(7)));
 
 const photosLast7Days = computed(() => {
   const keys = sevenDayKeysSet.value;
@@ -390,15 +370,7 @@ function onPhotoError(photo) {
 }
 
 function formatPhotoDate(dateStr) {
-  if (!dateStr) return "";
-  const d = new Date(dateStr.replace(" ", "T"));
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
+  return formatDateTimePST(dateStr);
 }
 
 onMounted(() => {

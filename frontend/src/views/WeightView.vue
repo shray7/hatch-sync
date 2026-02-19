@@ -66,15 +66,16 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { fetchGrowData } from "../api/grow";
+import {
+  formatDatePST,
+  formatTimePST,
+  toDate
+} from "../utils/pst";
 import { formatWeightLbsOz, gramsToLbs } from "../utils/weight";
 import TimeSeriesChart from "../components/TimeSeriesChart.vue";
 
 const raw = ref(null);
 const loaded = ref(false);
-
-function toDate(dateStr) {
-  return new Date(dateStr.replace(" ", "T"));
-}
 
 const weightOverTime = computed(() => {
   if (!raw.value) return { labels: [], values: [], valuesLbs: [] };
@@ -98,11 +99,12 @@ const allWeights = computed(() => {
       toDate(a.weightDate || a.createDate)
   );
   return sorted.map((w) => {
-    const d = toDate(w.weightDate || w.createDate);
+    const dateStr = w.weightDate || w.createDate;
     return {
       id: w.id,
-      date: d.toISOString().slice(0, 10),
-      time: d.toTimeString().slice(0, 5),
+      date: formatDatePST(dateStr),
+      time: formatTimePST(dateStr),
+      dateStr,
       weight: w.weight
     };
   });
@@ -123,7 +125,7 @@ const gainPerWeekOz = computed(() => {
   const oldest = list[list.length - 1];
   const newest = list[0];
   const days =
-    (toDate(newest.date) - toDate(oldest.date)) / (1000 * 60 * 60 * 24);
+    (toDate(newest.dateStr) - toDate(oldest.dateStr)) / (1000 * 60 * 60 * 24);
   if (days <= 0) return null;
   const gainPerDayG = (newest.weight - oldest.weight) / days;
   return (gainPerDayG * 7) / 28.3495; // grams per week -> oz per week

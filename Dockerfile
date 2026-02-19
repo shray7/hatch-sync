@@ -12,6 +12,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app /app/app
+COPY migrations /app/migrations
 # Service account: in CI the workflow writes from GOOGLE_SERVICE_ACCOUNT_JSON; for local docker build, put service_account.json in repo root.
 COPY service_account.json /app/
 EXPOSE 8000

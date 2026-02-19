@@ -64,18 +64,17 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { fetchGrowData } from "../api/grow";
+import {
+  dateKey,
+  formatDatePST,
+  formatTimePST,
+  lastNDaysKeysPST,
+  toDate
+} from "../utils/pst";
 import TimeSeriesChart from "../components/TimeSeriesChart.vue";
 
 const raw = ref(null);
 const loaded = ref(false);
-
-function toDate(dateStr) {
-  return new Date(dateStr.replace(" ", "T"));
-}
-
-function dateKey(dateStr) {
-  return dateStr.slice(0, 10);
-}
 
 function hoursBetween(startStr, endStr) {
   const start = toDate(startStr);
@@ -83,17 +82,7 @@ function hoursBetween(startStr, endStr) {
   return (end - start) / (1000 * 60 * 60);
 }
 
-const lastNDaysKeys = (n) => {
-  const keys = [];
-  const now = new Date();
-  for (let i = 0; i < n; i++) {
-    const d = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i)
-    );
-    keys.push(d.toISOString().slice(0, 10));
-  }
-  return keys.reverse();
-};
+const lastNDaysKeys = (n) => lastNDaysKeysPST(n);
 
 const sleepPerDay = computed(() => {
   if (!raw.value) return { labels: [], values: [] };
@@ -143,15 +132,17 @@ const recentSleeps = computed(() => {
       toDate(a.startTime || a.createDate)
   );
   return sorted.slice(0, 20).map((s) => {
-    const start = toDate(s.startTime || s.createDate);
-    const end = toDate(s.endTime || s.updateDate);
+    const startStr = s.startTime || s.createDate;
+    const endStr = s.endTime || s.updateDate;
+    const start = toDate(startStr);
+    const end = toDate(endStr);
     const durationH = (end - start) / (1000 * 60 * 60);
     const isNap = durationH < 4;
     return {
       id: s.id,
-      date: start.toISOString().slice(0, 10),
-      start: start.toTimeString().slice(0, 5),
-      end: end.toTimeString().slice(0, 5),
+      date: formatDatePST(startStr),
+      start: formatTimePST(startStr),
+      end: formatTimePST(endStr),
       duration: `${durationH.toFixed(1)} h`,
       type: isNap ? "Nap" : "Night"
     };

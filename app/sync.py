@@ -1,24 +1,24 @@
 """
-Sync Hatch Grow data (diapers, feedings, sleep, weight) to Google Calendar.
-Tracks last-seen record IDs per baby per type so only new entries become events.
-State is stored in Redis when available (survives restarts); otherwise falls back to sync_state.json.
+Sync Hatch Grow data (diapers, feedings, sleep, weight) from the database to Google Calendar.
+Only records with synced_to_calendar_at IS NULL are synced; after creating an event we set
+synced_to_calendar_at so they are not duplicated.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
 
-import aiohttp
-
-from app.cache import (
-    get_cached_grow_data,
-    get_cached_json,
-    get_cached_login,
-    set_cached_grow_data,
-    set_cached_json,
-    set_cached_login,
+from app.db import (
+    get_babies_for_sync,
+    get_unsynced_diapers_for_baby,
+    get_unsynced_feedings_for_baby,
+    get_unsynced_sleeps_for_baby,
+    get_unsynced_weights_for_baby,
+    mark_diapers_synced,
+    mark_feedings_synced,
+    mark_sleeps_synced,
+    mark_weights_synced,
 )
 from app.gcal_service import (
     create_event,
@@ -29,82 +29,19 @@ from app.gcal_service import (
     sleep_to_event,
     weight_to_event,
 )
-from app.hatch_grow_service import (
-    fetch_diapers,
-    fetch_feedings,
-    fetch_sleep,
-    fetch_weight,
-    login,
-)
 
 logger = logging.getLogger(__name__)
-
-STATE_FILE = Path(__file__).resolve().parent.parent / "sync_state.json"
-SYNC_STATE_CACHE_KEY = "sync:state"
-SYNC_STATE_TTL_SECONDS = 10 * 365 * 24 * 3600  # 10 years; state must survive restarts
-
-
-def _load_state_file() -> dict:
-    if not STATE_FILE.exists():
-        return {}
-    try:
-        with open(STATE_FILE) as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning("Could not load sync state file: %s", e)
-        return {}
-
-
-def _save_state_file(state: dict) -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
-
-
-async def _load_state() -> dict:
-    """Load state from Redis if available, else from file (file is ephemeral on Azure)."""
-    state = await get_cached_json(SYNC_STATE_CACHE_KEY)
-    if isinstance(state, dict):
-        return state
-    return _load_state_file()
-
-
-async def _save_state(state: dict) -> None:
-    """Persist state to Redis (when available) and to file as fallback."""
-    await set_cached_json(SYNC_STATE_CACHE_KEY, state, SYNC_STATE_TTL_SECONDS)
-    _save_state_file(state)
-
-
-def _state_key(baby_id: int, data_type: str) -> str:
-    return f"baby_{baby_id}_{data_type}"
-
-
-def _get_seen_ids(state: dict, baby_id: int, data_type: str) -> set[str]:
-    """Return seen record IDs as strings for consistent comparison (avoids int/str duplicate)."""
-    key = _state_key(baby_id, data_type)
-    raw = state.get(key, [])
-    return set(str(x) for x in raw)
-
-
-def _set_seen_ids(state: dict, baby_id: int, data_type: str, ids: list[str]) -> None:
-    key = _state_key(baby_id, data_type)
-    state[key] = list(ids)
 
 
 async def run_sync() -> dict:
     """
-    One full sync: login to Hatch, fetch all data, create GCal events for new
-    records, update state. Returns a small summary dict (e.g. created counts).
+    One full sync: load babies and unsynced records from PostgreSQL, create GCal events,
+    mark rows as synced. Returns a small summary dict (e.g. created counts).
     """
     summary = {"events_created": 0, "errors": []}
-    email = os.environ.get("HATCH_EMAIL")
-    password = os.environ.get("HATCH_PASSWORD")
     gcal_share_email = os.environ.get("GOOGLE_CALENDAR_SHARE_EMAIL", "").strip()
     service_account_file = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE")
 
-    if not email or not password:
-        summary["errors"].append("HATCH_EMAIL and HATCH_PASSWORD required")
-        return summary
     path = None
     if service_account_file:
         path = Path(service_account_file)
@@ -116,139 +53,77 @@ async def run_sync() -> dict:
         summary["errors"].append("GOOGLE_SERVICE_ACCOUNT_FILE not set or file missing")
         return summary
 
-    state = await _load_state()
-
     try:
         service = get_calendar_service()
     except Exception as e:
         summary["errors"].append(f"Google Calendar auth: {e}")
         return summary
 
-    async with aiohttp.ClientSession() as session:
-        login_data = await get_cached_login()
-        if not login_data:
+    babies = await get_babies_for_sync()
+    if not babies:
+        return summary
+
+    for internal_baby_id, hatch_baby_id, baby_name in babies:
+        try:
+            cal_id = get_or_create_baby_calendar(service, baby_name, gcal_share_email)
+        except Exception as e:
+            summary["errors"].append(f"Calendar for {baby_name}: {e}")
+            continue
+
+        # Diapers
+        diapers_list = await get_unsynced_diapers_for_baby(internal_baby_id, hatch_baby_id)
+        diaper_ids = []
+        for row_id, d in diapers_list:
             try:
-                login_data = await login(session, email, password)
+                summy, desc, start, end = diaper_to_event(d)
+                create_event(service, cal_id, summy, desc, start, end)
+                summary["events_created"] += 1
+                diaper_ids.append(row_id)
             except Exception as e:
-                summary["errors"].append(f"Hatch login: {e}")
-                return summary
-            # Cache full login payload (token + babies)
-            await set_cached_login(login_data)
+                summary["errors"].append(f"Diaper event {d.get('id')}: {e}")
+        if diaper_ids:
+            await mark_diapers_synced(diaper_ids)
 
-        token = login_data["token"]
-        babies = login_data.get("payload", {}).get("babies", [])
-
-        for baby in babies:
-            baby_id = baby["id"]
-            baby_name = baby.get("name", "Baby")
+        # Feedings
+        feedings_list = await get_unsynced_feedings_for_baby(internal_baby_id, hatch_baby_id)
+        feeding_ids = []
+        for row_id, f in feedings_list:
             try:
-                cal_id = get_or_create_baby_calendar(service, baby_name, gcal_share_email)
+                summy, desc, start, end = feeding_to_event(f)
+                create_event(service, cal_id, summy, desc, start, end)
+                summary["events_created"] += 1
+                feeding_ids.append(row_id)
             except Exception as e:
-                summary["errors"].append(f"Calendar for {baby_name}: {e}")
-                continue
+                summary["errors"].append(f"Feeding event {f.get('id')}: {e}")
+        if feeding_ids:
+            await mark_feedings_synced(feeding_ids)
 
-            # Try to use cached Grow data for this baby first
-            cached = await get_cached_grow_data(baby_id)
-            if cached and isinstance(cached, dict):
-                diapers = cached.get("diapers") or []
-                feedings = cached.get("feedings") or []
-                sleeps = cached.get("sleeps") or []
-                weights = cached.get("weights") or []
-            else:
-                # Diapers
-                try:
-                    diapers = await fetch_diapers(session, token, baby_id)
-                except Exception as e:
-                    summary["errors"].append(f"Diapers fetch: {e}")
-                    diapers = []
+        # Sleeps
+        sleeps_list = await get_unsynced_sleeps_for_baby(internal_baby_id, hatch_baby_id)
+        sleep_ids = []
+        for row_id, s in sleeps_list:
+            try:
+                summy, desc, start, end = sleep_to_event(s)
+                create_event(service, cal_id, summy, desc, start, end)
+                summary["events_created"] += 1
+                sleep_ids.append(row_id)
+            except Exception as e:
+                summary["errors"].append(f"Sleep event {s.get('id')}: {e}")
+        if sleep_ids:
+            await mark_sleeps_synced(sleep_ids)
 
-                # Feedings
-                try:
-                    feedings = await fetch_feedings(session, token, baby_id)
-                except Exception as e:
-                    summary["errors"].append(f"Feedings fetch: {e}")
-                    feedings = []
+        # Weights
+        weights_list = await get_unsynced_weights_for_baby(internal_baby_id, hatch_baby_id)
+        weight_ids = []
+        for row_id, w in weights_list:
+            try:
+                summy, desc, start, end = weight_to_event(w)
+                create_event(service, cal_id, summy, desc, start, end)
+                summary["events_created"] += 1
+                weight_ids.append(row_id)
+            except Exception as e:
+                summary["errors"].append(f"Weight event {w.get('id')}: {e}")
+        if weight_ids:
+            await mark_weights_synced(weight_ids)
 
-                # Sleep
-                try:
-                    sleeps = await fetch_sleep(session, token, baby_id)
-                except Exception as e:
-                    summary["errors"].append(f"Sleep fetch: {e}")
-                    sleeps = []
-
-                # Weight
-                try:
-                    weights = await fetch_weight(session, token, baby_id)
-                except Exception as e:
-                    summary["errors"].append(f"Weight fetch: {e}")
-                    weights = []
-
-                # Cache whatever we managed to fetch (even if some lists are empty)
-                await set_cached_grow_data(
-                    baby_id,
-                    {
-                        "diapers": diapers,
-                        "feedings": feedings,
-                        "sleeps": sleeps,
-                        "weights": weights,
-                    },
-                )
-
-            # Diapers → events (use str(rid) so int/str mismatch doesn't create duplicates)
-            seen = _get_seen_ids(state, baby_id, "diaper")
-            for d in diapers:
-                rid = d.get("id")
-                if rid is not None and str(rid) not in seen:
-                    try:
-                        summy, desc, start, end = diaper_to_event(d)
-                        create_event(service, cal_id, summy, desc, start, end)
-                        summary["events_created"] += 1
-                        seen.add(str(rid))
-                    except Exception as e:
-                        summary["errors"].append(f"Diaper event {rid}: {e}")
-            _set_seen_ids(state, baby_id, "diaper", list(seen))
-
-            # Feedings → events
-            seen = _get_seen_ids(state, baby_id, "feeding")
-            for f in feedings:
-                rid = f.get("id")
-                if rid is not None and str(rid) not in seen:
-                    try:
-                        summy, desc, start, end = feeding_to_event(f)
-                        create_event(service, cal_id, summy, desc, start, end)
-                        summary["events_created"] += 1
-                        seen.add(str(rid))
-                    except Exception as e:
-                        summary["errors"].append(f"Feeding event {rid}: {e}")
-            _set_seen_ids(state, baby_id, "feeding", list(seen))
-
-            # Sleep → events
-            seen = _get_seen_ids(state, baby_id, "sleep")
-            for s in sleeps:
-                rid = s.get("id")
-                if rid is not None and str(rid) not in seen:
-                    try:
-                        summy, desc, start, end = sleep_to_event(s)
-                        create_event(service, cal_id, summy, desc, start, end)
-                        summary["events_created"] += 1
-                        seen.add(str(rid))
-                    except Exception as e:
-                        summary["errors"].append(f"Sleep event {rid}: {e}")
-            _set_seen_ids(state, baby_id, "sleep", list(seen))
-
-            # Weight → events
-            seen = _get_seen_ids(state, baby_id, "weight")
-            for w in weights:
-                rid = w.get("id")
-                if rid is not None and str(rid) not in seen:
-                    try:
-                        summy, desc, start, end = weight_to_event(w)
-                        create_event(service, cal_id, summy, desc, start, end)
-                        summary["events_created"] += 1
-                        seen.add(str(rid))
-                    except Exception as e:
-                        summary["errors"].append(f"Weight event {rid}: {e}")
-            _set_seen_ids(state, baby_id, "weight", list(seen))
-
-    await _save_state(state)
     return summary

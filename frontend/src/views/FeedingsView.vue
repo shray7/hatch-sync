@@ -74,30 +74,19 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { fetchGrowData } from "../api/grow";
+import {
+  dateKey,
+  formatDatePST,
+  formatTimePST,
+  lastNDaysKeysPST,
+  toDate
+} from "../utils/pst";
 import TimeSeriesChart from "../components/TimeSeriesChart.vue";
 
 const raw = ref(null);
 const loaded = ref(false);
 
-function dateKey(dateStr) {
-  return dateStr.slice(0, 10);
-}
-
-function toDate(dateStr) {
-  return new Date(dateStr.replace(" ", "T"));
-}
-
-const lastNDaysKeys = (n) => {
-  const keys = [];
-  const now = new Date();
-  for (let i = 0; i < n; i++) {
-    const d = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i)
-    );
-    keys.push(d.toISOString().slice(0, 10));
-  }
-  return keys.reverse();
-};
+const lastNDaysKeys = (n) => lastNDaysKeysPST(n);
 
 const feedingsPerDay = computed(() => {
   if (!raw.value) return { labels: [], values: [] };
@@ -136,9 +125,9 @@ const recentFeedings = computed(() => {
       toDate(b.startTime || b.createDate) - toDate(a.startTime || a.createDate)
   );
   return sorted.slice(0, 20).map((f) => {
-    const d = toDate(f.startTime || f.createDate);
-    const date = d.toISOString().slice(0, 10);
-    const time = d.toTimeString().slice(0, 5);
+    const dateStr = f.startTime || f.createDate;
+    const date = formatDatePST(dateStr);
+    const time = formatTimePST(dateStr);
     const durationMin = (f.durationInSeconds || 0) / 60;
     return {
       id: f.id,

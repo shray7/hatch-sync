@@ -7,6 +7,23 @@ services:
     ports:
       - "6379:6379"
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: hatch-sync-postgres
+    environment:
+      POSTGRES_USER: hatch
+      POSTGRES_PASSWORD: hatch
+      POSTGRES_DB: hatch
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hatch -d hatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
     build: .
     container_name: hatch-sync-api
@@ -16,10 +33,17 @@ services:
       - .env
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://hatch:hatch@postgres:5432/hatch
+      - HATCH_TIMEZONE=America/Los_Angeles
     volumes:
-      # Optional: mount service_account.json and sync_state.json if present
+      # Optional: mount service_account.json if present
       - ./service_account.json:/app/service_account.json:ro
-      - ./sync_state.json:/app/sync_state.json
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
 

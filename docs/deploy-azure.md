@@ -29,7 +29,8 @@ If the repo is not yet a git repo: `git init`, then add a remote and follow step
 
 - **Backend**: FastAPI app runs as a container on **Azure Container Apps** in the **hatchsync** resource group (subscription **TaskAgent**). Images are built and pushed to **Azure Container Registry**; GitHub Actions deploys on push to `main`.
 - **Frontend**: Vue SPA is built and deployed to **GitHub Pages** by GitHub Actions; it calls the Azure backend using `VITE_API_URL`.
-- **Redis**: Used for caching Hatch API responses. **Phase 1** uses a containerized Redis app in the same Container Apps environment. **Phase 2** (optional) is Azure Cache for Redis.
+- **PostgreSQL**: Grow data (babies, feedings, diapers, sleeps, weights, photos) is stored in **Azure Database for PostgreSQL Flexible Server**. One-time setup creates the server and database; the API runs schema migrations on **first startup** (idempotent `CREATE TABLE IF NOT EXISTS`).
+- **Redis**: Used for optional caching. **Phase 1** uses a containerized Redis app in the same Container Apps environment. **Phase 2** (optional) is Azure Cache for Redis.
 
 ---
 
@@ -56,7 +57,29 @@ This creates:
 
 The script prints the internal **Redis URL** and stores it as a secret on the API app so `REDIS_URL` is set automatically.
 
-### 1.2 Service principal for GitHub Actions
+### 1.2 (Optional) PostgreSQL for Grow data
+
+To store Grow data in PostgreSQL (recommended so `/grow/data` and `/grow/photos` serve from your own DB):
+
+```bash
+chmod +x scripts/azure-setup-postgres.sh
+./scripts/azure-setup-postgres.sh westus2
+```
+
+Set a password when prompted, or set `POSTGRES_ADMIN_PASSWORD` in the environment. The script creates **Azure Database for PostgreSQL Flexible Server** (Burstable B1ms), a database named `hatch`, and a firewall rule so Container Apps can connect. It prints **DATABASE_URL** (with `?sslmode=require`).
+
+**One-time schema init:** The API app runs migrations on startup (`migrations/001_initial.sql`). The first time the API starts with `DATABASE_URL` set, it creates the tables; subsequent starts are a no-op (`IF NOT EXISTS`). No separate migration job is required.
+
+Then pass `DATABASE_URL` when setting secrets so the API can connect:
+
+```bash
+DATABASE_URL='postgresql://hatchsync:PASSWORD@hatchsync-pg.postgres.database.azure.com:5432/hatch?sslmode=require' \
+  HATCH_EMAIL=... HATCH_PASSWORD=... ... ./scripts/azure-set-secrets.sh
+```
+
+The set-secrets script adds `database-url` to the Container App secrets and sets `DATABASE_URL=secretref:database-url` and `HATCH_TIMEZONE=America/Los_Angeles` (unless you set `HATCH_TIMEZONE` yourself).
+
+### 1.3 Service principal for GitHub Actions
 
 Create a service principal scoped to the **hatchsync** resource group so the workflow can push images to ACR and update the Container App:
 
@@ -67,7 +90,7 @@ chmod +x scripts/azure-create-sp.sh
 
 The script prints JSON. Copy the entire output and add it as a **GitHub repository secret** named **`AZURE_CREDENTIALS`** (Settings → Secrets and variables → Actions → New repository secret).
 
-### 1.3 Container App secrets (Hatch and Google)
+### 1.4 Container App secrets (Hatch and Google)
 
 Set Hatch and Google credentials as **secrets** on the Container App using the helper script (values from environment variables, not written to disk):
 
@@ -87,7 +110,7 @@ This sets the secrets and links them to the app’s environment variables. The s
 
 The workflow writes this into `service_account.json` in the build context; the image is built with that file at `/app/service_account.json`, and the Container App already has `GOOGLE_SERVICE_ACCOUNT_FILE=/app/service_account.json` set by the setup script. If `GOOGLE_SERVICE_ACCOUNT_JSON` is not set, the workflow still builds (with an empty `{}` file); sync will then fail until you add the secret and redeploy.
 
-### 1.4 GitHub repository configuration
+### 1.5 GitHub repository configuration
 
 In **Settings → Secrets and variables → Actions** add:
 
@@ -132,9 +155,10 @@ The app’s `app/cache.py` uses `REDIS_URL` as-is; the `redis` client supports `
 
 ## 3. After the first deploy
 
-1. **Backend**: Push to `main` (or run the **Backend (Azure)** workflow). It builds the image, pushes to **hatchsyncacr**, and updates the **hatch-sync-api** Container App. Get the API URL from the Azure portal (Container Apps → hatch-sync-api → Application Url) or from the workflow’s “Get API URL and smoke test” step.
-2. **Frontend**: Set **VITE_API_URL** to that API URL, then push changes under `frontend/` (or run the **Frontend (GitHub Pages)** workflow). The site will be at `https://<owner>.github.io/<repo>/`.
-3. **Smoke test**: Open `/health` on the API URL; you should see `{"status":"ok","redis":"ok"}` (or `"disabled"` if Redis is not used). Then open the GitHub Pages site and confirm the dashboard loads and calls the API.
+1. **Backend**: Push to `main` (or run the **Backend (Azure)** workflow). It builds the image (including `migrations/`), pushes to **hatchsyncacr**, and updates the **hatch-sync-api** Container App. Get the API URL from the Azure portal (Container Apps → hatch-sync-api → Application Url) or from the workflow’s “Get API URL and smoke test” step.
+2. **PostgreSQL**: If you ran `azure-setup-postgres.sh`, set **DATABASE_URL** on the API via `azure-set-secrets.sh` (see step 1.2). The first time the API starts with **DATABASE_URL** set, it runs migrations and creates the tables; the background job then fills the DB from Hatch.
+3. **Frontend**: Set **VITE_API_URL** to that API URL, then push changes under `frontend/` (or run the **Frontend (GitHub Pages)** workflow). The site will be at `https://<owner>.github.io/<repo>/`.
+4. **Smoke test**: Open `/health` on the API URL; you should see `{"status":"ok","redis":"ok"}` (or `"disabled"` if Redis is not used). Then open the GitHub Pages site and confirm the dashboard loads and calls the API.
 
 ---
 
@@ -142,6 +166,7 @@ The app’s `app/cache.py` uses `REDIS_URL` as-is; the `redis` client supports `
 
 - **403 / ACR pull**: The API app’s managed identity has **AcrPull** on the registry; if you recreated the app, run the role assignment again (see end of `scripts/azure-setup.sh`).
 - **Redis connection refused**: Ensure **hatch-sync-redis** is running and that `REDIS_URL` uses the internal hostname (e.g. `*.internal.*`). For Azure Cache for Redis, use the correct port (6380) and `rediss://` with SSL.
+- **PostgreSQL connection failed**: Ensure the API app has **DATABASE_URL** set (via `azure-set-secrets.sh`). The URL must include `?sslmode=require`. If the server was just created, wait a few minutes and redeploy the API. Check firewall rules on the Flexible Server allow public access (e.g. rule 0.0.0.0–255.255.255.255).
 - **CORS**: The FastAPI app allows all origins; if you restrict them later, add your GitHub Pages origin (e.g. `https://<owner>.github.io`).
 
 ### 4.1 API not reachable (timeout / connection refused)
