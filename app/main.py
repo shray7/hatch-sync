@@ -348,7 +348,6 @@ async def auth_google(request: Request, next_url: str = Query("", alias="next"))
 @app.get("/auth/callback")
 async def auth_callback(
     request: Request,
-    response: Response,
     code: str = Query(...),
     state: str = Query(""),
 ):
@@ -377,13 +376,15 @@ async def auth_callback(
         raise HTTPException(status_code=403, detail="Not in admin allowlist")
     if tokens.get("refresh_token"):
         await upsert_google_refresh_token(email, tokens["refresh_token"])
-    set_session_response(response, email)
     frontend_base = os.environ.get("FRONTEND_URL", "https://shray7.github.io/hatch-sync").rstrip("/")
     path = (state.strip() or "/admin")
     if not path.startswith("/"):
         path = "/" + path
     redirect_to = f"{frontend_base}{path}"
-    return RedirectResponse(url=redirect_to, status_code=302)
+    redirect_response = RedirectResponse(url=redirect_to, status_code=302)
+    # Attach session cookie to the redirect response so the browser stores it.
+    set_session_response(redirect_response, email)
+    return redirect_response
 
 
 @app.get("/auth/me")
