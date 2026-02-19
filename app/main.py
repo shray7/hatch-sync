@@ -378,7 +378,7 @@ async def auth_callback(
     if tokens.get("refresh_token"):
         await upsert_google_refresh_token(email, tokens["refresh_token"])
     set_session_response(response, email)
-    frontend_base = os.environ.get("FRONTEND_URL", "https://shray7.github.io").rstrip("/")
+    frontend_base = os.environ.get("FRONTEND_URL", "https://shray7.github.io/hatch-sync").rstrip("/")
     path = (state.strip() or "/admin")
     if not path.startswith("/"):
         path = "/" + path
