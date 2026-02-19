@@ -56,14 +56,8 @@ async def close_pool() -> None:
         _pool = None
 
 
-async def run_migrations() -> None:
-    """Run SQL in migrations/001_initial.sql. Executes each statement separately (asyncpg allows one per execute)."""
-    if not _pool:
-        return
-    path = _migrations_dir() / "001_initial.sql"
-    if not path.exists():
-        return
-    sql = path.read_text()
+def _parse_sql_statements(sql: str) -> list[str]:
+    """Split SQL into executable statements (by semicolon), stripping comments and blanks."""
     statements = []
     for part in sql.split(";"):
         lines = [
@@ -73,10 +67,24 @@ async def run_migrations() -> None:
         stmt = " ".join(lines).strip()
         if stmt:
             statements.append(stmt + ";")
+    return statements
+
+
+async def run_migrations() -> None:
+    """Run all SQL files in migrations/ in sorted order. Executes each statement separately."""
+    if not _pool:
+        return
+    mig_dir = _migrations_dir()
+    if not mig_dir.exists():
+        return
+    paths = sorted(mig_dir.glob("*.sql"))
     async with _pool.acquire() as conn:
-        for stmt in statements:
-            await conn.execute(stmt)
-    logger.info("Ran migrations from %s", path.name)
+        for path in paths:
+            sql = path.read_text()
+            statements = _parse_sql_statements(sql)
+            for stmt in statements:
+                await conn.execute(stmt)
+            logger.info("Ran migrations from %s", path.name)
 
 
 def _dt(s: str):
@@ -249,8 +257,8 @@ async def upsert_photos(baby_id: int, hatch_baby_id: int, items: list[dict], mak
             url = d.get("cutDownloadUrl") or d.get("downloadUrl") or None
             await conn.execute(
                 """
-                INSERT INTO photos (baby_id, photo_key, create_date, hatch_download_url, created_at)
-                VALUES ($1, $2, $3, $4, now())
+                INSERT INTO photos (baby_id, photo_key, create_date, hatch_download_url, source, media_type, created_at)
+                VALUES ($1, $2, $3, $4, 'hatch', 'photo', now())
                 ON CONFLICT (photo_key) DO UPDATE SET
                     create_date = EXCLUDED.create_date,
                     hatch_download_url = COALESCE(EXCLUDED.hatch_download_url, photos.hatch_download_url)
@@ -260,6 +268,82 @@ async def upsert_photos(baby_id: int, hatch_baby_id: int, items: list[dict], mak
                 create_dt,
                 url,
             )
+
+
+async def upsert_google_refresh_token(email: str, refresh_token: str) -> None:
+    """Store or update Google refresh token for the given admin email."""
+    if not _pool:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO user_google_tokens (email, refresh_token, updated_at)
+                VALUES ($1, $2, now())
+                ON CONFLICT (email) DO UPDATE SET
+                    refresh_token = EXCLUDED.refresh_token,
+                    updated_at = now()
+                """,
+                email.strip().lower(),
+                refresh_token,
+            )
+    except Exception as e:
+        logger.warning("upsert_google_refresh_token failed: %s", e)
+
+
+async def get_google_refresh_token(email: str) -> Optional[str]:
+    """Return stored refresh token for the email, or None."""
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT refresh_token FROM user_google_tokens WHERE email = $1",
+                email.strip().lower(),
+            )
+            return row["refresh_token"] if row else None
+    except Exception as e:
+        logger.warning("get_google_refresh_token failed: %s", e)
+        return None
+
+
+async def get_first_baby() -> Optional[tuple[int, int]]:
+    """Return (internal_id, hatch_id) for the first baby, or None."""
+    if not _pool:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT id, hatch_id FROM babies ORDER BY id LIMIT 1")
+            if not row:
+                return None
+            return (row["id"], row["hatch_id"])
+    except Exception as e:
+        logger.warning("get_first_baby failed: %s", e)
+        return None
+
+
+async def insert_uploaded_photo(
+    baby_id: int,
+    photo_key: str,
+    create_date: Any,
+    source: str = "device",
+    media_type: str = "photo",
+) -> None:
+    """Insert one uploaded photo/video row (source=device or google_photos). create_date is timezone-aware datetime."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO photos (baby_id, photo_key, create_date, hatch_download_url, source, media_type, created_at)
+            VALUES ($1, $2, $3, NULL, $4, $5, now())
+            ON CONFLICT (photo_key) DO NOTHING
+            """,
+            baby_id,
+            photo_key,
+            create_date,
+            source,
+            media_type,
+        )
 
 
 # --- API-shaped reads (for /grow/data and /grow/photos) ---
@@ -329,6 +413,8 @@ def _row_photo(r, hatch_baby_id: int) -> dict:
         "createDate": format_hatch_dt(r["create_date"]),
         "cutDownloadUrl": r["hatch_download_url"],
         "downloadUrl": r["hatch_download_url"],
+        "source": r.get("source") or "hatch",
+        "mediaType": r.get("media_type") or "photo",
     }
 
 
@@ -388,7 +474,7 @@ async def get_photos() -> Optional[dict[str, Any]]:
             baby_id = first["id"]
             hatch_baby_id = first["hatch_id"]
             rows = await conn.fetch(
-                "SELECT photo_key, create_date, hatch_download_url FROM photos WHERE baby_id = $1 ORDER BY create_date",
+                "SELECT photo_key, create_date, hatch_download_url, source, media_type FROM photos WHERE baby_id = $1 ORDER BY create_date",
                 baby_id,
             )
             return {"photos": [_row_photo(r, hatch_baby_id) for r in rows]}
@@ -407,7 +493,7 @@ async def get_photos_for_baby_hatch_id(hatch_baby_id: int) -> Optional[list[dict
             if not baby:
                 return None
             rows = await conn.fetch(
-                "SELECT photo_key, create_date, hatch_download_url FROM photos WHERE baby_id = $1 ORDER BY create_date",
+                "SELECT photo_key, create_date, hatch_download_url, source, media_type FROM photos WHERE baby_id = $1 ORDER BY create_date",
                 baby["id"],
             )
             return [_row_photo(r, hatch_baby_id) for r in rows]

@@ -5,24 +5,45 @@ Also syncs Hatch Grow data (diapers, feedings, sleep, weight) to Google Calendar
 import asyncio
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Optional
 
 import aiohttp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, HTTPException, Query, Response
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
+from fastapi import Depends, File, FastAPI, HTTPException, Query, Request, Response, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
+
+from app.auth import (
+    build_google_auth_url,
+    clear_session_response,
+    exchange_code_for_tokens,
+    get_allowlist_emails,
+    get_google_client_config,
+    get_session_email,
+    refresh_access_token,
+    set_session_response,
+    verify_google_id_token,
+)
 from app.cache import redis_health
+from app.azure_blob import upload_blob
 from app.db import (
+    get_first_baby,
+    get_google_refresh_token,
     get_grow_data,
     get_photos as get_photos_from_db,
     get_photos_for_baby_hatch_id,
     init_pool,
     close_pool,
+    insert_uploaded_photo,
     upsert_baby,
     upsert_diapers,
     upsert_feedings,
+    upsert_google_refresh_token,
     upsert_photos,
     upsert_sleeps,
     upsert_weights,
@@ -43,6 +64,12 @@ from app.hatch_grow_service import (
     login as hatch_grow_login,
 )
 from app.sync import run_sync
+from app.google_photos import (
+    batch_get_media_items,
+    get_download_url,
+    download_media_bytes,
+    list_media_items,
+)
 from app.photo_store import (
     fetch_and_store_photo,
     get_photo_bytes,
@@ -52,6 +79,33 @@ from app.photo_store import (
 
 # Timeout for outbound requests to Hatch API so /grow/data and /grow/photos don't hang
 HATCH_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=50, connect=15)
+
+# Extension -> (content_type, media_type) for uploads
+_UPLOAD_CONTENT_TYPES = {
+    ".jpg": ("image/jpeg", "photo"),
+    ".jpeg": ("image/jpeg", "photo"),
+    ".png": ("image/png", "photo"),
+    ".heic": ("image/heic", "photo"),
+    ".gif": ("image/gif", "photo"),
+    ".webp": ("image/webp", "photo"),
+    ".mp4": ("video/mp4", "video"),
+    ".mov": ("video/quicktime", "video"),
+    ".webm": ("video/webm", "video"),
+}
+
+
+def _content_type_from_key(key: str) -> tuple[str, str]:
+    """Return (content_type, media_type) from blob key extension. Default image/jpeg, photo."""
+    ext = ""
+    for e in _UPLOAD_CONTENT_TYPES:
+        if key.lower().endswith(e):
+            ext = e
+            break
+    if not ext:
+        # try generic extension
+        if "." in key:
+            ext = "." + key.rsplit(".", 1)[-1].lower()
+    return _UPLOAD_CONTENT_TYPES.get(ext, ("image/jpeg", "photo"))
 
 # How often to refresh the grow data cache in the background (keeps page loads fast)
 CACHE_REFRESH_INTERVAL_MINUTES = int(os.environ.get("HATCH_CACHE_REFRESH_MINUTES", "15"))
@@ -211,10 +265,11 @@ async def grow_photos():
 @app.get("/photos/image")
 async def photo_image(baby_id: int, key: str):
     """
-    Serve a photo image from Azure Blob Storage by internal key.
+    Serve a photo or video from Azure Blob Storage by internal key.
 
     If the blob is missing, look up the photo in the database for this baby to get its
     download URL; download once from Hatch, store in Blob, and stream back.
+    Content-Type is set from key extension (e.g. video/mp4 for .mp4). Videos get Accept-Ranges.
     """
     key_normalized = normalize_photo_key_for_lookup(key)
     log = logging.getLogger(__name__)
@@ -224,7 +279,11 @@ async def photo_image(baby_id: int, key: str):
     if data is None and key_normalized != key:
         data = await get_photo_bytes(key_normalized)
     if data is not None:
-        return Response(content=data, media_type="image/jpeg")
+        content_type, media_type = _content_type_from_key(key)
+        headers = {}
+        if media_type == "video":
+            headers["Accept-Ranges"] = "bytes"
+        return Response(content=data, media_type=content_type, headers=headers)
 
     # 2. Fallback: find photo metadata from DB (baby_id is Hatch baby id)
     photos_list = await get_photos_for_baby_hatch_id(baby_id)
@@ -255,11 +314,220 @@ async def photo_image(baby_id: int, key: str):
     if data is None:
         log.warning("photos/image: failed to fetch from Hatch for baby_id=%s key=%s", baby_id, key)
         raise HTTPException(status_code=502, detail="Failed to fetch photo from Hatch")
-    return Response(content=data, media_type="image/jpeg")
+    content_type, _ = _content_type_from_key(key)
+    return Response(content=data, media_type=content_type)
+
+def require_admin(request: Request) -> str:
+    """Dependency: return admin email or raise 401/403."""
+    return get_session_email(request)
+
+
+@app.get("/auth/google")
+async def auth_google(request: Request, next_url: str = Query("", alias="next")):
+    """Redirect to Google OAuth. Optional 'next' is passed through state to redirect after login."""
+    try:
+        # redirect_uri must be the backend callback URL
+        base = os.environ.get("API_BASE_URL", "").strip() or str(request.base_url).rstrip("/")
+        redirect_uri = f"{base}/auth/callback"
+        state = next_url if next_url else ""
+        url = build_google_auth_url(redirect_uri, state=state or None)
+        return RedirectResponse(url=url)
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get("/auth/callback")
+async def auth_callback(
+    request: Request,
+    response: Response,
+    code: str = Query(...),
+    state: str = Query(""),
+):
+    """Exchange code for tokens, verify, set session cookie, redirect to frontend."""
+    base = os.environ.get("API_BASE_URL", "").strip() or str(request.base_url).rstrip("/")
+    redirect_uri = f"{base}/auth/callback"
+    try:
+        tokens = await exchange_code_for_tokens(code, redirect_uri)
+    except Exception as e:
+        logger.exception("auth_callback: token exchange failed")
+        raise HTTPException(status_code=400, detail="Token exchange failed")
+    id_token_str = tokens.get("id_token")
+    if not id_token_str:
+        raise HTTPException(status_code=400, detail="No id_token in response")
+    try:
+        client_id, _ = get_google_client_config()
+        claims = verify_google_id_token(id_token_str, client_id)
+    except Exception as e:
+        logger.warning("auth_callback: invalid id_token: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid token")
+    email = (claims.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="No email in token")
+    allowlist = get_allowlist_emails()
+    if not allowlist or email not in allowlist:
+        raise HTTPException(status_code=403, detail="Not in admin allowlist")
+    if tokens.get("refresh_token"):
+        await upsert_google_refresh_token(email, tokens["refresh_token"])
+    set_session_response(response, email)
+    frontend_base = os.environ.get("FRONTEND_URL", "https://shray7.github.io").rstrip("/")
+    path = (state.strip() or "/admin")
+    if not path.startswith("/"):
+        path = "/" + path
+    redirect_to = f"{frontend_base}{path}"
+    return RedirectResponse(url=redirect_to, status_code=302)
+
+
+@app.get("/auth/me")
+async def auth_me(request: Request):
+    """Return current user email if session valid (for admin UI)."""
+    email = get_session_email(request)
+    return {"email": email}
+
+
+@app.post("/auth/logout")
+async def auth_logout(response: Response):
+    """Clear session cookie."""
+    clear_session_response(response)
+    return {"ok": True}
+
+
+@app.post("/admin/upload")
+async def admin_upload(
+    _: str = Depends(require_admin),
+    files: list[UploadFile] = File(...),
+):
+    """Upload one or more photos/videos from device. Admin only. Associates with first baby."""
+    baby = await get_first_baby()
+    if not baby:
+        raise HTTPException(status_code=503, detail="No baby in database; add Hatch credentials and run sync first.")
+    internal_id, hatch_id = baby
+    uploaded = 0
+    for uf in files:
+        if not uf.filename:
+            continue
+        ext = "." + uf.filename.rsplit(".", 1)[-1].lower() if "." in uf.filename else ".jpg"
+        content_type, media_type = _UPLOAD_CONTENT_TYPES.get(ext, ("application/octet-stream", "photo"))
+        key = f"baby/{hatch_id}/uploads/{uuid.uuid4().hex}{ext}"
+        try:
+            data = await uf.read()
+            if not data:
+                continue
+            await upload_blob(key, data, content_type=content_type)
+            await insert_uploaded_photo(
+                internal_id,
+                key,
+                datetime.now(timezone.utc),
+                source="device",
+                media_type=media_type,
+            )
+            uploaded += 1
+        except Exception as e:
+            logger.warning("admin_upload: failed %s: %s", uf.filename, e)
+    return {"uploaded": uploaded}
+
+
+class GooglePhotosImportBody(BaseModel):
+    media_item_ids: list[str]
+
+
+@app.get("/admin/google-photos/list")
+async def admin_google_photos_list(
+    email: str = Depends(require_admin),
+    page_size: int = Query(50, le=100),
+    page_token: Optional[str] = Query(None),
+):
+    """List media items from the user's Google Photos library. Admin only."""
+    refresh = await get_google_refresh_token(email)
+    if not refresh:
+        raise HTTPException(
+            status_code=400,
+            detail="No Google Photos access. Sign out and sign in again with Google to grant access.",
+        )
+    try:
+        access = await refresh_access_token(refresh)
+    except Exception as e:
+        logger.warning("admin_google_photos_list: refresh failed: %s", e)
+        raise HTTPException(status_code=503, detail="Could not get Google access token")
+    try:
+        data = await list_media_items(access, page_size=page_size, page_token=page_token)
+        return data
+    except Exception as e:
+        logger.warning("admin_google_photos_list: API failed: %s", e)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/admin/google-photos/import")
+async def admin_google_photos_import(
+    body: GooglePhotosImportBody,
+    email: str = Depends(require_admin),
+):
+    """Import selected media items from Google Photos into the baby timeline. Admin only."""
+    if not body.media_item_ids:
+        return {"imported": 0}
+    baby = await get_first_baby()
+    if not baby:
+        raise HTTPException(status_code=503, detail="No baby in database.")
+    internal_id, hatch_id = baby
+    refresh = await get_google_refresh_token(email)
+    if not refresh:
+        raise HTTPException(status_code=400, detail="No Google Photos access. Sign in again with Google.")
+    try:
+        access = await refresh_access_token(refresh)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail="Could not get Google access token")
+    items = await batch_get_media_items(access, body.media_item_ids)
+    imported = 0
+    for item in items:
+        mid = item.get("id")
+        base_url = item.get("baseUrl")
+        mime = item.get("mimeType") or ""
+        filename = item.get("filename") or "import"
+        if not base_url:
+            continue
+        url = get_download_url(base_url, mime)
+        data = await download_media_bytes(url)
+        if not data:
+            continue
+        ext = ".jpg"
+        if "video" in mime.lower():
+            ext = ".mp4" if "mp4" in mime.lower() else ".mov"
+        else:
+            if "png" in mime.lower():
+                ext = ".png"
+            elif "gif" in mime.lower():
+                ext = ".gif"
+            elif "webp" in mime.lower():
+                ext = ".webp"
+        key = f"baby/{hatch_id}/uploads/{uuid.uuid4().hex}{ext}"
+        content_type = mime if mime else "image/jpeg"
+        media_type = "video" if "video" in mime.lower() else "photo"
+        try:
+            await upload_blob(key, data, content_type=content_type)
+            creation = item.get("mediaMetadata", {}).get("creationTime")
+            create_dt = datetime.now(timezone.utc)
+            if creation:
+                try:
+                    # Google returns ISO format e.g. 2024-01-15T12:00:00Z
+                    ts = creation.replace("Z", "+00:00")
+                    create_dt = datetime.fromisoformat(ts)
+                except (ValueError, TypeError):
+                    pass
+            await insert_uploaded_photo(
+                internal_id,
+                key,
+                create_dt,
+                source="google_photos",
+                media_type=media_type,
+            )
+            imported += 1
+        except Exception as e:
+            logger.warning("admin_google_photos_import: failed %s: %s", mid, e)
+    return {"imported": imported}
+
 
 @app.post("/sync")
-async def trigger_sync():
-    """Run Hatch Grow → Google Calendar sync once. Returns summary (events_created, errors)."""
+async def trigger_sync(_: str = Depends(require_admin)):
+    """Run Hatch Grow → Google Calendar sync once. Returns summary (events_created, errors). Admin only."""
     try:
         summary = await run_sync()
         return summary

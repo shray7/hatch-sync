@@ -37,7 +37,7 @@
         class="flex flex-col overflow-hidden rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70"
       >
         <a
-          v-if="photoUrl(photo)"
+          v-if="photoUrl(photo) && !isVideo(photo)"
           :href="photoUrl(photo)"
           target="_blank"
           rel="noopener noreferrer"
@@ -59,6 +59,26 @@
             <span class="text-slate-500">Link may have expired. Refresh page for new links.</span>
           </div>
         </a>
+        <div
+          v-else-if="photoUrl(photo) && isVideo(photo)"
+          class="block aspect-square w-full overflow-hidden bg-slate-800"
+        >
+          <video
+            v-if="!failedImages.has(photo.createDate)"
+            :src="photoUrl(photo)"
+            class="h-full w-full object-cover"
+            controls
+            playsinline
+            preload="metadata"
+            @error="onImageError($event, photo)"
+          />
+          <div
+            v-else
+            class="h-full w-full flex flex-col items-center justify-center text-slate-400 text-xs p-2 gap-1 text-center"
+          >
+            <span>Video unavailable</span>
+          </div>
+        </div>
         <div
           v-else
           class="aspect-square w-full bg-slate-800 flex items-center justify-center text-slate-500 text-xs p-2"
@@ -93,7 +113,7 @@ const failedImages = ref(new Set());
 const rateLimitedStale = ref(false);
 
 function photoUrl(photo) {
-  // Use backend proxy with internal photoKey so images come from our Blob storage
+  // Use backend proxy with internal photoKey so images/videos come from our Blob storage
   if (!photo?.photoKey || !photo?.babyId) return null;
   const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
   const params = new URLSearchParams({
@@ -101,6 +121,10 @@ function photoUrl(photo) {
     key: photo.photoKey
   });
   return `${apiBase}/photos/image?${params.toString()}`;
+}
+
+function isVideo(photo) {
+  return (photo?.mediaType || photo?.media_type || "").toLowerCase() === "video";
 }
 
 function onImageError(event, photo) {

@@ -110,6 +110,14 @@ This sets the secrets and links them to the app’s environment variables. The s
 
 The workflow writes this into `service_account.json` in the build context; the image is built with that file at `/app/service_account.json`, and the Container App already has `GOOGLE_SERVICE_ACCOUNT_FILE=/app/service_account.json` set by the setup script. If `GOOGLE_SERVICE_ACCOUNT_JSON` is not set, the workflow still builds (with an empty `{}` file); sync will then fail until you add the secret and redeploy.
 
+**Google OAuth for admin (optional):** To enable the Admin page (Sign in with Google, upload from device, import from Google Photos):
+
+1. In Google Cloud Console (same or different project), create an **OAuth 2.0 Client ID** (Web application). Add authorized redirect URI: `https://<your-api-url>/auth/callback` (your hatch-sync-api Container App URL, no trailing slash).
+2. Enable **Google Photos Library API** if you want "Import from Google Photos".
+3. Run `azure-set-secrets.sh` with the additional env vars: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ADMIN_ALLOWLIST_EMAILS` (comma-separated emails), `SESSION_SECRET` (long random string), `API_BASE_URL` (your API URL), `FRONTEND_URL` (your GitHub Pages URL, e.g. `https://shray7.github.io`).
+
+Without these, the Admin page will show "Sign in with Google" but login will fail with 503 until the OAuth client and allowlist are configured.
+
 ### 1.5 GitHub repository configuration
 
 In **Settings → Secrets and variables → Actions** add:

@@ -5,6 +5,7 @@ import DiapersView from "./views/DiapersView.vue";
 import SleepView from "./views/SleepView.vue";
 import WeightView from "./views/WeightView.vue";
 import PhotosView from "./views/PhotosView.vue";
+import AdminView from "./views/AdminView.vue";
 
 const routes = [
   { path: "/", name: "dashboard", component: DashboardView },
@@ -12,7 +13,8 @@ const routes = [
   { path: "/diapers", name: "diapers", component: DiapersView },
   { path: "/sleep", name: "sleep", component: SleepView },
   { path: "/weight", name: "weight", component: WeightView },
-  { path: "/photos", name: "photos", component: PhotosView }
+  { path: "/photos", name: "photos", component: PhotosView },
+  { path: "/admin", name: "admin", component: AdminView }
 ];
 
 const router = createRouter({

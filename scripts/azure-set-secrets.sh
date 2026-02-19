@@ -39,7 +39,7 @@ ENV_DEFAULT_DOMAIN=$(az containerapp env show \
 REDIS_URL="redis://${REDIS_APP_NAME}.internal.${ENV_DEFAULT_DOMAIN}:6379/0"
 echo "Redis URL: $REDIS_URL"
 
-# Build secrets list (required + optional DATABASE_URL)
+# Build secrets list (required + optional DATABASE_URL + optional Google OAuth)
 SECRETS_ARR=(
   "redis-url=$REDIS_URL"
   "hatch-email=$HATCH_EMAIL"
@@ -50,6 +50,18 @@ SECRETS_ARR=(
 if [ -n "${DATABASE_URL:-}" ]; then
   SECRETS_ARR+=("database-url=$DATABASE_URL")
   echo "Including DATABASE_URL in secrets (Grow data stored in PostgreSQL)."
+fi
+if [ -n "${GOOGLE_CLIENT_ID:-}" ]; then
+  SECRETS_ARR+=("google-client-id=$GOOGLE_CLIENT_ID")
+fi
+if [ -n "${GOOGLE_CLIENT_SECRET:-}" ]; then
+  SECRETS_ARR+=("google-client-secret=$GOOGLE_CLIENT_SECRET")
+fi
+if [ -n "${ADMIN_ALLOWLIST_EMAILS:-}" ]; then
+  SECRETS_ARR+=("admin-allowlist-emails=$ADMIN_ALLOWLIST_EMAILS")
+fi
+if [ -n "${SESSION_SECRET:-}" ]; then
+  SECRETS_ARR+=("session-secret=$SESSION_SECRET")
 fi
 
 echo "Setting secrets on Container App '$APP_NAME' in resource group '$RESOURCE_GROUP'..."
@@ -84,6 +96,25 @@ fi
 
 if [ -n "${HATCH_CACHE_REFRESH_MINUTES:-}" ]; then
   env_vars+=("HATCH_CACHE_REFRESH_MINUTES=$HATCH_CACHE_REFRESH_MINUTES")
+fi
+
+if [ -n "${GOOGLE_CLIENT_ID:-}" ]; then
+  env_vars+=("GOOGLE_CLIENT_ID=secretref:google-client-id")
+fi
+if [ -n "${GOOGLE_CLIENT_SECRET:-}" ]; then
+  env_vars+=("GOOGLE_CLIENT_SECRET=secretref:google-client-secret")
+fi
+if [ -n "${ADMIN_ALLOWLIST_EMAILS:-}" ]; then
+  env_vars+=("ADMIN_ALLOWLIST_EMAILS=secretref:admin-allowlist-emails")
+fi
+if [ -n "${SESSION_SECRET:-}" ]; then
+  env_vars+=("SESSION_SECRET=secretref:session-secret")
+fi
+if [ -n "${API_BASE_URL:-}" ]; then
+  env_vars+=("API_BASE_URL=$API_BASE_URL")
+fi
+if [ -n "${FRONTEND_URL:-}" ]; then
+  env_vars+=("FRONTEND_URL=$FRONTEND_URL")
 fi
 
 az containerapp update \

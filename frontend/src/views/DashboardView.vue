@@ -111,7 +111,7 @@
         class="flex flex-col overflow-hidden rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70"
       >
         <a
-          v-if="photoUrl(photo)"
+          v-if="photoUrl(photo) && !isVideo(photo)"
           :href="photoUrl(photo)"
           target="_blank"
           rel="noopener noreferrer"
@@ -133,6 +133,26 @@
             <span class="text-slate-500">Link may have expired.</span>
           </div>
         </a>
+        <div
+          v-else-if="photoUrl(photo) && isVideo(photo)"
+          class="block aspect-square w-full overflow-hidden bg-slate-800"
+        >
+          <video
+            v-if="!failedImages.has(photo.createDate)"
+            :src="photoUrl(photo)"
+            class="h-full w-full object-cover"
+            controls
+            playsinline
+            preload="metadata"
+            @error="onPhotoError(photo)"
+          />
+          <div
+            v-else
+            class="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center text-xs text-slate-400"
+          >
+            <span>Video unavailable</span>
+          </div>
+        </div>
         <div
           v-else
           class="flex aspect-square w-full items-center justify-center bg-slate-800 p-2 text-xs text-slate-500"
@@ -189,6 +209,10 @@ function photoUrl(photo) {
     key: photo.photoKey
   });
   return `${apiBase}/photos/image?${params.toString()}`;
+}
+
+function isVideo(photo) {
+  return (photo?.mediaType || photo?.media_type || "").toLowerCase() === "video";
 }
 
 function hoursBetween(startStr, endStr) {
