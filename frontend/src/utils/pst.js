@@ -22,31 +22,43 @@ export function lastNDaysKeysPST(n) {
   return keys;
 }
 
-/** Date part (YYYY-MM-DD) from API string; API sends times in PST so this is the PST date. */
-export function dateKey(dateStr) {
-  if (!dateStr) return "";
-  return dateStr.slice(0, 10);
-}
-
-/** Parse API datetime string (ISO with offset or "YYYY-MM-DD HH:MM:SS"). */
+/**
+ * Parse API datetime string (ISO with offset, or "YYYY-MM-DD HH:MM:SS") to a Date.
+ * Use this plus timeZone: PST_TZ when formatting so date/time are correct in PST.
+ */
 export function toDate(dateStr) {
   if (!dateStr) return new Date(NaN);
-  const s = dateStr.replace(" ", "T");
+  const s = String(dateStr).trim().replace(" ", "T");
   return new Date(s);
+}
+
+/** PST date (YYYY-MM-DD) for the given API datetime string. */
+export function dateKey(dateStr) {
+  if (!dateStr) return "";
+  const d = toDate(dateStr);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-CA", { timeZone: PST_TZ });
 }
 
 /** Display date (YYYY-MM-DD) in PST from API string. */
 export function formatDatePST(dateStr) {
   if (!dateStr) return "";
-  return dateStr.slice(0, 10);
+  const d = toDate(dateStr);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-CA", { timeZone: PST_TZ });
 }
 
-/** Display time (HH:mm) in PST from API string (assumes API sent PST). */
+/** Display time (HH:mm) in PST from API string. */
 export function formatTimePST(dateStr) {
   if (!dateStr) return "";
-  if (dateStr.includes("T") && dateStr.length >= 16) return dateStr.slice(11, 16);
-  if (dateStr.length >= 16) return dateStr.slice(11, 16);
-  return "";
+  const d = toDate(dateStr);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, {
+    timeZone: PST_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
 }
 
 /** Format for photo/detail display: "Feb 18, 2026, 2:00 PM" in PST. */

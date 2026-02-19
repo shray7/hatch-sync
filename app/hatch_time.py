@@ -18,24 +18,40 @@ def _display_tz() -> ZoneInfo:
 
 
 def parse_hatch_dt(s: str) -> datetime:
-    """Parse Hatch API datetime string to naive datetime."""
+    """
+    Parse Hatch API datetime string.
+    If the string is UTC (ends with Z or +00:00), returns timezone-aware UTC.
+    Otherwise treats as local time in HATCH_TIMEZONE and returns naive datetime.
+    """
     if not s:
-        return datetime.utcnow()
-    s = s.strip().replace("Z", "").replace("T", " ")
+        return datetime.now(timezone.utc)
+    s = s.strip()
+    # UTC: Hatch may send "2026-02-18T22:00:00Z" or "...+00:00"
+    if s.endswith("Z") or s.endswith("+00:00"):
+        s_iso = s.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(s_iso)
+        except ValueError:
+            pass
+    # Local (naive) format: "2026-02-18 14:00:00" or "2026-02-18T14:00:00"
+    s_plain = s.replace("T", " ")
     for size, fmt in [(19, "%Y-%m-%d %H:%M:%S"), (16, "%Y-%m-%d %H:%M"), (10, "%Y-%m-%d")]:
         try:
-            return datetime.strptime(s[:size], fmt)
+            return datetime.strptime(s_plain[:size], fmt)
         except ValueError:
             continue
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
-def hatch_time_to_utc(dt_naive: datetime) -> datetime:
+def hatch_time_to_utc(dt: datetime) -> datetime:
     """
-    Interpret naive datetime as local time in HATCH_TIMEZONE (default PST) and return UTC.
+    Convert to UTC. If dt is timezone-aware, convert as-is. If naive, interpret as
+    local time in HATCH_TIMEZONE (default PST) and return UTC.
     """
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc)
     tz = _display_tz()
-    return dt_naive.replace(tzinfo=tz).astimezone(timezone.utc)
+    return dt.replace(tzinfo=tz).astimezone(timezone.utc)
 
 
 def add_minutes(dt: datetime, minutes: int) -> datetime:

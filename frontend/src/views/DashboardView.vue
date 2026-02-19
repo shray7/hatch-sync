@@ -11,7 +11,7 @@
 
     <section
       v-if="loaded && raw"
-      class="grid grid-cols-1 gap-4 sm:grid-cols-3"
+      class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5"
     >
       <StatCard
         label="Diapers today"
@@ -24,6 +24,16 @@
         :sub="`7-day avg: ${sevenDayAverages.feedings.toFixed(1)}`"
       />
       <StatCard
+        label="Avg between diapers"
+        :value="avgDiaperIntervalFormatted"
+        sub="Last 7 days"
+      />
+      <StatCard
+        label="Avg between feedings"
+        :value="avgFeedingIntervalFormatted"
+        sub="Last 7 days"
+      />
+      <StatCard
         label="Last weight"
         :value="lastWeightFormatted"
         :sub="lastWeightDate"
@@ -32,7 +42,7 @@
 
     <section
       v-if="loaded && raw"
-      class="grid grid-cols-1 gap-6 lg:grid-cols-2"
+      class="grid grid-cols-1 gap-6 lg:grid-cols-3"
     >
       <TimeSeriesChart
         title="Diapers per day (last 14 days)"
@@ -44,10 +54,8 @@
         :labels="feedingsPerDay.labels"
         :data="feedingsPerDay.values"
       />
-    </section>
-
-    <section v-if="loaded && raw && weightOverTime.labels.length > 0" class="max-w-2xl">
       <TimeSeriesChart
+        v-if="weightOverTime.labels.length > 0"
         title="Weight over time (lb)"
         :labels="weightOverTime.labels"
         :data="weightOverTime.valuesLbs"
@@ -247,6 +255,51 @@ const sevenDayAverages = computed(() => {
     feedings: avg(perDay.feedings)
   };
 });
+
+/** Average time between diaper changes (hours) over last 7 days. */
+const avgDiaperIntervalHours = computed(() => {
+  if (!raw.value?.diapers?.length) return null;
+  const keys = sevenDayKeysSet.value;
+  const sorted = [...raw.value.diapers]
+    .filter((d) => keys.has(dateKey(d.diaperDate || d.createDate)))
+    .map((d) => new Date(d.diaperDate || d.createDate).getTime())
+    .sort((a, b) => a - b);
+  if (sorted.length < 2) return null;
+  const intervals = [];
+  for (let i = 1; i < sorted.length; i++) {
+    intervals.push((sorted[i] - sorted[i - 1]) / (1000 * 60 * 60));
+  }
+  return intervals.reduce((s, h) => s + h, 0) / intervals.length;
+});
+
+/** Average time between feedings (hours) over last 7 days. */
+const avgFeedingIntervalHours = computed(() => {
+  if (!raw.value?.feedings?.length) return null;
+  const keys = sevenDayKeysSet.value;
+  const sorted = [...raw.value.feedings]
+    .filter((f) => keys.has(dateKey(f.startTime || f.createDate)))
+    .map((f) => new Date(f.startTime || f.createDate).getTime())
+    .sort((a, b) => a - b);
+  if (sorted.length < 2) return null;
+  const intervals = [];
+  for (let i = 1; i < sorted.length; i++) {
+    intervals.push((sorted[i] - sorted[i - 1]) / (1000 * 60 * 60));
+  }
+  return intervals.reduce((s, h) => s + h, 0) / intervals.length;
+});
+
+function formatIntervalHours(hours) {
+  if (hours == null || !Number.isFinite(hours)) return "–";
+  if (hours < 1) return `${(hours * 60).toFixed(0)} m`;
+  return `${hours.toFixed(1)} h`;
+}
+
+const avgDiaperIntervalFormatted = computed(() =>
+  formatIntervalHours(avgDiaperIntervalHours.value)
+);
+const avgFeedingIntervalFormatted = computed(() =>
+  formatIntervalHours(avgFeedingIntervalHours.value)
+);
 
 const diapersPerDay = computed(() => {
   if (!raw.value) return { labels: [], values: [] };
