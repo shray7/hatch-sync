@@ -17,26 +17,31 @@
         label="Diapers today"
         :value="todayCounts.diapers"
         :sub="`7-day avg: ${sevenDayAverages.diapers.toFixed(1)}`"
+        class="animate-fade-slide-up"
       />
       <StatCard
         label="Feedings today"
         :value="todayCounts.feedings"
         :sub="`7-day avg: ${sevenDayAverages.feedings.toFixed(1)}`"
+        class="animate-fade-slide-up"
       />
       <StatCard
         label="Avg between diapers"
         :value="avgDiaperIntervalFormatted"
         sub="Last 7 days"
+        class="animate-fade-slide-up"
       />
       <StatCard
         label="Avg between feedings"
         :value="avgFeedingIntervalFormatted"
         sub="Last 7 days"
+        class="animate-fade-slide-up"
       />
       <StatCard
         label="Last weight"
         :value="lastWeightFormatted"
         :sub="lastWeightDate"
+        class="animate-fade-slide-up"
       />
     </section>
 
@@ -48,17 +53,20 @@
         title="Diapers per day (last 14 days)"
         :labels="diapersPerDay.labels"
         :data="diapersPerDay.values"
+        class="animate-fade-slide-up"
       />
       <TimeSeriesChart
         title="Feedings per day (last 14 days)"
         :labels="feedingsPerDay.labels"
         :data="feedingsPerDay.values"
+        class="animate-fade-slide-up"
       />
       <TimeSeriesChart
         v-if="weightOverTime.labels.length > 0"
         title="Weight over time (lb)"
         :labels="weightOverTime.labels"
         :data="weightOverTime.valuesLbs"
+        class="animate-fade-slide-up"
       />
     </section>
 
@@ -107,7 +115,7 @@
       <div
         v-for="photo in photosLast7Days"
         :key="photo.createDate + (photoUrl(photo) || '')"
-        class="flex flex-col overflow-hidden rounded-xl border border-slate-700/50 bg-slate-800/40 shadow-lg transition hover:border-slate-600/60"
+        class="flex flex-col overflow-hidden rounded-xl border border-slate-700/50 bg-slate-800/40 shadow-lg transition hover:border-slate-600/60 animate-fade-slide-up"
       >
         <a
           v-if="photoUrl(photo) && !isVideo(photo)"

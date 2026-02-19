@@ -8,3 +8,19 @@ body {
   background-image: linear-gradient(180deg, rgba(190, 24, 93, 0.03) 0%, transparent 40%);
 }
 
+/* Simple fade + slide-up entrance animation for loaded content */
+@keyframes fade-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-slide-up {
+  animation: fade-slide-up 320ms ease-out both;
+}
+
