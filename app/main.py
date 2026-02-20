@@ -410,6 +410,29 @@ async def auth_logout(response: Response):
     return {"ok": True}
 
 
+def _ext_and_media_from_file(uf: UploadFile) -> tuple[str, str, str]:
+    """Return (ext, content_type, media_type). Uses filename first, then content_type header."""
+    ext = ".jpg"
+    content_type = "application/octet-stream"
+    media_type = "photo"
+    if uf.filename and "." in uf.filename:
+        ext = "." + uf.filename.rsplit(".", 1)[-1].lower()
+        content_type, media_type = _UPLOAD_CONTENT_TYPES.get(ext, (content_type, media_type))
+    if uf.content_type:
+        ct = (uf.content_type or "").lower()
+        if "video/" in ct:
+            media_type = "video"
+            if "mp4" in ct or ext == ".mp4":
+                ext, content_type = ".mp4", "video/mp4"
+            elif "quicktime" in ct or ext == ".mov":
+                ext, content_type = ".mov", "video/quicktime"
+            elif "webm" in ct or ext == ".webm":
+                ext, content_type = ".webm", "video/webm"
+            else:
+                ext, content_type = ".mp4", ct
+    return ext, content_type, media_type
+
+
 async def _process_uploaded_files(files: list[UploadFile], source: str) -> int:
     """Process multipart files and store in blob + DB. Returns count uploaded."""
     baby = await get_first_baby()
@@ -418,10 +441,7 @@ async def _process_uploaded_files(files: list[UploadFile], source: str) -> int:
     internal_id, hatch_id = baby
     uploaded = 0
     for uf in files:
-        if not uf.filename:
-            continue
-        ext = "." + uf.filename.rsplit(".", 1)[-1].lower() if "." in uf.filename else ".jpg"
-        content_type, media_type = _UPLOAD_CONTENT_TYPES.get(ext, ("application/octet-stream", "photo"))
+        ext, content_type, media_type = _ext_and_media_from_file(uf)
         key = f"baby/{hatch_id}/uploads/{uuid.uuid4().hex}{ext}"
         try:
             data = await uf.read()
@@ -437,7 +457,7 @@ async def _process_uploaded_files(files: list[UploadFile], source: str) -> int:
             )
             uploaded += 1
         except Exception as e:
-            logger.warning("upload: failed %s: %s", uf.filename, e)
+            logger.warning("upload: failed %s: %s", uf.filename or key, e)
     return uploaded
 
 
@@ -452,16 +472,18 @@ async def admin_upload(
 
 
 @app.post("/admin/upload-companion")
-async def admin_upload_companion(
-    request: Request,
-    files: list[UploadFile] = File(...),
-):
-    """Accept uploads from Uppy Companion (Google Photos Picker). Requires X-Companion-Secret header."""
+async def admin_upload_companion(request: Request):
+    """Accept uploads from Uppy Companion (Google Photos Picker). Requires X-Companion-Secret header.
+    Companion may send files as form field 'files' or 'files[]'."""
     secret = os.environ.get("COMPANION_UPLOAD_SECRET", "").strip()
     if not secret:
         raise HTTPException(status_code=503, detail="Companion upload not configured")
     if request.headers.get("X-Companion-Secret") != secret:
         raise HTTPException(status_code=403, detail="Invalid or missing Companion secret")
+    form = await request.form()
+    files = list(form.getlist("files") or form.getlist("files[]"))
+    if not files:
+        return {"uploaded": 0}
     n = await _process_uploaded_files(files, "google_photos")
     return {"uploaded": n}
 
