@@ -147,4 +147,5 @@ jobs:
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --query properties.configuration.ingress.fqdn -o tsv)
           echo "Companion URL: https://${FQDN}"
+          echo "Verify deploy: curl -s https://${FQDN}/version  (expect companion: 5.x, googlePicker: true)"
           echo "Set VITE_COMPANION_URL=https://${FQDN} and VITE_GOOGLE_CLIENT_ID in repo vars, then rebuild frontend."

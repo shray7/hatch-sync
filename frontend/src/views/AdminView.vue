@@ -267,7 +267,8 @@ async function openGooglePhotosImport() {
 }
 
 function initUppyWhenReady() {
-  const companionUrl = import.meta.env.VITE_COMPANION_URL || authConfigCompanionUrl.value;
+  const rawCompanionUrl = import.meta.env.VITE_COMPANION_URL || authConfigCompanionUrl.value;
+  const companionUrl = (rawCompanionUrl || "").replace(/\/+$/, "");
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || authConfigClientId.value;
   const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
   if (!companionUrl || !clientId || uppyInstance) return;

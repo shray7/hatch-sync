@@ -38,8 +38,13 @@ const companionOptions = {
   debug: process.env.NODE_ENV !== 'production'
 }
 
-// Health check (before Companion so it's not shadowed)
+// Health check and version (before Companion so not shadowed)
 app.get('/healthz', (req, res) => res.json({ status: 'ok' }))
+const companionPkg = require('@uppy/companion/package.json')
+app.get('/version', (req, res) => res.json({
+  companion: companionPkg.version,
+  googlePicker: process.env.COMPANION_ENABLE_GOOGLE_PICKER_ENDPOINT !== 'false'
+}))
 
 // CORS for browser → Companion calls
 app.use(cors({ origin: allowedOrigins.length ? allowedOrigins : false, credentials: true }))
