@@ -18,6 +18,12 @@ export async function fetchAuthMe() {
   return res.data;
 }
 
+/** Public auth config (e.g. google_client_id for Picker). No auth required. */
+export async function fetchAuthConfig() {
+  const res = await axios.get(`${apiBase}/auth/config`, { timeout: 5000 });
+  return res.data;
+}
+
 export async function authLogout() {
   const res = await axiosWithCreds.post("/auth/logout");
   return res.data;

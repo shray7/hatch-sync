@@ -156,7 +156,7 @@ import GooglePhotosPicker from "@uppy/google-photos-picker";
 import XHRUpload from "@uppy/xhr-upload";
 import "@uppy/core/css/style.min.css";
 import "@uppy/dashboard/css/style.min.css";
-import { getAuthLoginUrl, fetchAuthMe, authLogout, triggerSync, uploadFiles, fetchGooglePhotosList, importFromGooglePhotos } from "../api/auth";
+import { getAuthLoginUrl, fetchAuthMe, fetchAuthConfig, authLogout, triggerSync, uploadFiles, fetchGooglePhotosList, importFromGooglePhotos } from "../api/auth";
 
 
 const authStatus = ref("loading");
@@ -182,7 +182,15 @@ const uppyUploadMessage = ref("");
 const uppyUploadError = ref(false);
 let uppyInstance = null;
 
-const useUppyPicker = computed(() => !!(import.meta.env.VITE_COMPANION_URL && import.meta.env.VITE_GOOGLE_CLIENT_ID));
+/** From API /auth/config when build-time vars are missing. */
+const authConfigClientId = ref("");
+const authConfigCompanionUrl = ref("");
+
+const useUppyPicker = computed(() => {
+  const companionUrl = import.meta.env.VITE_COMPANION_URL || authConfigCompanionUrl.value;
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || authConfigClientId.value;
+  return !!(companionUrl && clientId);
+});
 
 async function checkAuth() {
   authStatus.value = "loading";
@@ -240,14 +248,21 @@ async function onDeviceUpload(event) {
   }
 }
 
-function openGooglePhotosImport() {
+async function openGooglePhotosImport() {
   googlePhotosSection.value = true;
+  if (!authConfigClientId.value || !authConfigCompanionUrl.value) {
+    try {
+      const config = await fetchAuthConfig();
+      if (config?.google_client_id) authConfigClientId.value = config.google_client_id;
+      if (config?.companion_url) authConfigCompanionUrl.value = config.companion_url;
+    } catch (_) {}
+  }
   nextTick(() => initUppyWhenReady());
 }
 
 function initUppyWhenReady() {
-  const companionUrl = import.meta.env.VITE_COMPANION_URL;
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const companionUrl = import.meta.env.VITE_COMPANION_URL || authConfigCompanionUrl.value;
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || authConfigClientId.value;
   const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
   if (!companionUrl || !clientId || uppyInstance) return;
   nextTick(() => {

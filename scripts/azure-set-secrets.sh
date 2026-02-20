@@ -123,6 +123,9 @@ fi
 if [ -n "${COMPANION_UPLOAD_SECRET:-}" ]; then
   env_vars+=("COMPANION_UPLOAD_SECRET=secretref:companion-upload-secret")
 fi
+if [ -n "${COMPANION_PUBLIC_URL:-}" ]; then
+  env_vars+=("COMPANION_PUBLIC_URL=$COMPANION_PUBLIC_URL")
+fi
 
 az containerapp update \
   --name "$APP_NAME" \

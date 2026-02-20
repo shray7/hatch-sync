@@ -334,9 +334,10 @@ def _oauth_redirect_base(request: Request) -> str:
 
 @app.get("/auth/config")
 async def auth_config():
-    """Return public auth config (e.g. Google OAuth client_id for frontend Picker). No secrets."""
+    """Return public auth config (e.g. Google OAuth client_id, Companion URL for frontend Picker). No secrets."""
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
-    return {"google_client_id": client_id or ""}
+    companion_url = os.environ.get("COMPANION_PUBLIC_URL", "").strip()
+    return {"google_client_id": client_id or "", "companion_url": companion_url or ""}
 
 
 @app.get("/auth/google")
