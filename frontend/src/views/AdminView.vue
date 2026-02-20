@@ -82,17 +82,24 @@
 
       <section v-if="googlePhotosSection" class="rounded-xl border border-slate-800 bg-slate-900/70 p-6">
         <h2 class="text-sm font-semibold text-rose-200/90 mb-3">Import from Google Photos</h2>
-        <p class="text-sm text-slate-400 mb-3">Load your Google Photos library and select items to add to the baby timeline.</p>
-        <button
-          type="button"
-          class="rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700 disabled:opacity-50"
-          :disabled="googlePhotosLoading"
-          @click="loadGooglePhotos"
-        >
-          {{ googlePhotosLoading ? "Loading…" : "Load from Google Photos" }}
-        </button>
-        <p v-if="googlePhotosError" class="mt-2 text-sm text-rose-300">{{ googlePhotosError }}</p>
-        <div v-if="googlePhotosItems.length > 0" class="mt-4">
+        <template v-if="useUppyPicker">
+          <p class="text-sm text-slate-400 mb-3">Pick photos or videos below, then click Upload. Files are sent to the hatch-sync timeline.</p>
+          <div :id="uppyContainerId" class="uppy-dashboard-container mt-2"></div>
+          <p v-if="uppyUploadMessage" class="mt-2 text-sm" :class="uppyUploadError ? 'text-rose-300' : 'text-slate-400'">{{ uppyUploadMessage }}</p>
+        </template>
+        <template v-else>
+          <p class="text-sm text-slate-400 mb-3">Load your Google Photos library and select items to add to the baby timeline.</p>
+          <button
+            type="button"
+            class="rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+            :disabled="googlePhotosLoading"
+            @click="loadGooglePhotos"
+          >
+            {{ googlePhotosLoading ? "Loading…" : "Load from Google Photos" }}
+          </button>
+          <p v-if="googlePhotosError" class="mt-2 text-sm text-rose-300">{{ googlePhotosError }}</p>
+        </template>
+        <div v-if="googlePhotosItems.length > 0 && !useUppyPicker" class="mt-4">
           <div class="flex flex-wrap gap-2 mb-2">
             <label class="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
               <input type="checkbox" :checked="allGooglePhotosSelected" @change="toggleAllGooglePhotos" />
@@ -142,7 +149,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import Uppy from "@uppy/core";
+import Dashboard from "@uppy/dashboard";
+import GooglePhotosPicker from "@uppy/google-photos-picker";
+import XHRUpload from "@uppy/xhr-upload";
+import "@uppy/core/css/style.min.css";
+import "@uppy/dashboard/css/style.min.css";
 import { getAuthLoginUrl, fetchAuthMe, authLogout, triggerSync, uploadFiles, fetchGooglePhotosList, importFromGooglePhotos } from "../api/auth";
 
 
@@ -164,6 +177,12 @@ const selectedGooglePhotosIds = ref([]);
 const googlePhotosImporting = ref(false);
 const googlePhotosImportMessage = ref("");
 const googlePhotosImportError = ref(false);
+const uppyContainerId = "uppy-google-photos-picker";
+const uppyUploadMessage = ref("");
+const uppyUploadError = ref(false);
+let uppyInstance = null;
+
+const useUppyPicker = computed(() => !!(import.meta.env.VITE_COMPANION_URL && import.meta.env.VITE_GOOGLE_CLIENT_ID));
 
 async function checkAuth() {
   authStatus.value = "loading";
@@ -223,6 +242,43 @@ async function onDeviceUpload(event) {
 
 function openGooglePhotosImport() {
   googlePhotosSection.value = true;
+  nextTick(() => initUppyWhenReady());
+}
+
+function initUppyWhenReady() {
+  const companionUrl = import.meta.env.VITE_COMPANION_URL;
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  if (!companionUrl || !clientId || uppyInstance) return;
+  nextTick(() => {
+    const el = document.getElementById(uppyContainerId);
+    if (!el) return;
+    const uppy = new Uppy({ restrictions: { maxNumberOfFiles: 50 }, autoProceed: false })
+      .use(GooglePhotosPicker, { companionUrl, clientId, companionCookiesRule: "same-origin" })
+      .use(Dashboard, {
+        inline: true,
+        target: `#${uppyContainerId}`,
+        proudlyDisplayPoweredByUppy: false,
+        showProgressDetails: true,
+        width: "100%",
+        height: 380,
+        note: "Pick photos or videos from Google Photos to add to the baby timeline."
+      })
+      .use(XHRUpload, {
+        endpoint: `${apiBase}/admin/upload`,
+        fieldName: "files",
+        formData: true,
+        bundle: false,
+        withCredentials: true
+      });
+    uppy.on("complete", (result) => {
+      uppyUploadError.value = (result.failed || []).length > 0;
+      const ok = (result.successful || []).length;
+      const fail = (result.failed || []).length;
+      uppyUploadMessage.value = fail ? `Uploaded ${ok} file(s), ${fail} failed.` : `Uploaded ${ok} file(s) from Google Photos.`;
+    });
+    uppyInstance = uppy;
+  });
 }
 
 function thumbnailUrl(item) {
@@ -290,5 +346,12 @@ async function doImportGooglePhotos() {
 
 onMounted(() => {
   checkAuth();
+});
+
+onBeforeUnmount(() => {
+  if (uppyInstance) {
+    uppyInstance.close();
+    uppyInstance = null;
+  }
 });
 </script>

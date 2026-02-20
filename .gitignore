@@ -32,3 +32,7 @@ build/
 node_modules/
 frontend/node_modules/
 frontend/dist/
+
+# Companion
+companion/node_modules/
+companion/output/

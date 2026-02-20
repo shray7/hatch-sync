@@ -332,6 +332,13 @@ def _oauth_redirect_base(request: Request) -> str:
     return url
 
 
+@app.get("/auth/config")
+async def auth_config():
+    """Return public auth config (e.g. Google OAuth client_id for frontend Picker). No secrets."""
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+    return {"google_client_id": client_id or ""}
+
+
 @app.get("/auth/google")
 async def auth_google(request: Request, next_url: str = Query("", alias="next")):
     """Redirect to Google OAuth. Optional 'next' is passed through state to redirect after login."""
@@ -402,12 +409,8 @@ async def auth_logout(response: Response):
     return {"ok": True}
 
 
-@app.post("/admin/upload")
-async def admin_upload(
-    _: str = Depends(require_admin),
-    files: list[UploadFile] = File(...),
-):
-    """Upload one or more photos/videos from device. Admin only. Associates with first baby."""
+async def _process_uploaded_files(files: list[UploadFile], source: str) -> int:
+    """Process multipart files and store in blob + DB. Returns count uploaded."""
     baby = await get_first_baby()
     if not baby:
         raise HTTPException(status_code=503, detail="No baby in database; add Hatch credentials and run sync first.")
@@ -428,13 +431,38 @@ async def admin_upload(
                 internal_id,
                 key,
                 datetime.now(timezone.utc),
-                source="device",
+                source=source,
                 media_type=media_type,
             )
             uploaded += 1
         except Exception as e:
-            logger.warning("admin_upload: failed %s: %s", uf.filename, e)
+            logger.warning("upload: failed %s: %s", uf.filename, e)
+    return uploaded
+
+
+@app.post("/admin/upload")
+async def admin_upload(
+    _: str = Depends(require_admin),
+    files: list[UploadFile] = File(...),
+):
+    """Upload one or more photos/videos from device. Admin only."""
+    uploaded = await _process_uploaded_files(files, "device")
     return {"uploaded": uploaded}
+
+
+@app.post("/admin/upload-companion")
+async def admin_upload_companion(
+    request: Request,
+    files: list[UploadFile] = File(...),
+):
+    """Accept uploads from Uppy Companion (Google Photos Picker). Requires X-Companion-Secret header."""
+    secret = os.environ.get("COMPANION_UPLOAD_SECRET", "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="Companion upload not configured")
+    if request.headers.get("X-Companion-Secret") != secret:
+        raise HTTPException(status_code=403, detail="Invalid or missing Companion secret")
+    n = await _process_uploaded_files(files, "google_photos")
+    return {"uploaded": n}
 
 
 class GooglePhotosImportBody(BaseModel):
