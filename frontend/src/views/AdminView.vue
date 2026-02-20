@@ -88,6 +88,7 @@
           <p v-if="uppyUploadMessage" class="mt-2 text-sm" :class="uppyUploadError ? 'text-rose-300' : 'text-slate-400'">{{ uppyUploadMessage }}</p>
         </template>
         <template v-else>
+          <p v-if="googlePhotosConfigError" class="text-sm text-rose-300 mb-2">{{ googlePhotosConfigError }}</p>
           <p class="text-sm text-slate-400 mb-3">Load your Google Photos library and select items to add to the baby timeline.</p>
           <button
             type="button"
@@ -149,7 +150,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Uppy from "@uppy/core";
 import Dashboard from "@uppy/dashboard";
 import GooglePhotosPicker from "@uppy/google-photos-picker";
@@ -180,6 +181,7 @@ const googlePhotosImportError = ref(false);
 const uppyContainerId = "uppy-google-photos-picker";
 const uppyUploadMessage = ref("");
 const uppyUploadError = ref(false);
+const googlePhotosConfigError = ref("");
 let uppyInstance = null;
 
 /** From API /auth/config when build-time vars are missing. */
@@ -249,14 +251,18 @@ async function onDeviceUpload(event) {
 }
 
 async function openGooglePhotosImport() {
-  googlePhotosSection.value = true;
+  googlePhotosConfigError.value = "";
   if (!authConfigClientId.value || !authConfigCompanionUrl.value) {
     try {
       const config = await fetchAuthConfig();
       if (config?.google_client_id) authConfigClientId.value = config.google_client_id;
       if (config?.companion_url) authConfigCompanionUrl.value = config.companion_url;
-    } catch (_) {}
+    } catch (e) {
+      console.warn("Auth config fetch failed:", e);
+      googlePhotosConfigError.value = "Could not load picker config. Check the browser console and that the API URL is set.";
+    }
   }
+  googlePhotosSection.value = true;
   nextTick(() => initUppyWhenReady());
 }
 
@@ -358,6 +364,16 @@ async function doImportGooglePhotos() {
     googlePhotosImporting.value = false;
   }
 }
+
+watch(
+  () => [googlePhotosSection.value, authConfigClientId.value, authConfigCompanionUrl.value],
+  () => {
+    if (googlePhotosSection.value && (authConfigClientId.value || import.meta.env.VITE_GOOGLE_CLIENT_ID) && (authConfigCompanionUrl.value || import.meta.env.VITE_COMPANION_URL)) {
+      nextTick(() => initUppyWhenReady());
+    }
+  },
+  { deep: true }
+);
 
 onMounted(() => {
   checkAuth();
