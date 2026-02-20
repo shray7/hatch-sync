@@ -30,10 +30,11 @@ const companionOptions = {
   },
   secret: process.env.COMPANION_SECRET || 'change-me-in-prod',
   filePath: process.env.COMPANION_DATADIR || './output',
-  cors: { origin: allowedOrigins.length ? allowedOrigins : false, credentials: true },
+  corsOrigins: allowedOrigins.length ? allowedOrigins : true,
   uploadUrls: uploadUrls.length ? uploadUrls : undefined,
   uploadHeaders: Object.keys(uploadHeaders).length ? uploadHeaders : undefined,
   enableGooglePickerEndpoint: process.env.COMPANION_ENABLE_GOOGLE_PICKER_ENDPOINT !== 'false',
+  maxFilenameLength: parseInt(process.env.COMPANION_MAX_FILENAME_LENGTH || '500', 10) || 500,
   debug: process.env.NODE_ENV !== 'production'
 }
 
