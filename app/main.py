@@ -471,20 +471,32 @@ async def admin_upload(
     return {"uploaded": uploaded}
 
 
+def _upload_companion_auth(request: Request) -> tuple[str, str]:
+    """Accept either X-Companion-Secret (from Companion server) or admin session (from browser).
+    Returns (source_label, _) for logging; raises if neither is valid."""
+    secret = os.environ.get("COMPANION_UPLOAD_SECRET", "").strip()
+    if secret and request.headers.get("X-Companion-Secret") == secret:
+        return "google_photos", "companion"
+    try:
+        get_session_email(request)
+        return "device", "browser"
+    except HTTPException:
+        if secret:
+            raise HTTPException(status_code=403, detail="Invalid or missing Companion secret")
+        raise HTTPException(status_code=503, detail="Companion upload not configured")
+
+
 @app.post("/admin/upload-companion")
 async def admin_upload_companion(request: Request):
-    """Accept uploads from Uppy Companion (Google Photos Picker). Requires X-Companion-Secret header.
+    """Accept uploads from Uppy Companion (Google Photos Picker) or direct browser upload.
+    Auth: X-Companion-Secret header (Companion) or admin session cookie (browser).
     Companion may send files as form field 'files' or 'files[]'."""
-    secret = os.environ.get("COMPANION_UPLOAD_SECRET", "").strip()
-    if not secret:
-        raise HTTPException(status_code=503, detail="Companion upload not configured")
-    if request.headers.get("X-Companion-Secret") != secret:
-        raise HTTPException(status_code=403, detail="Invalid or missing Companion secret")
+    source, _ = _upload_companion_auth(request)
     form = await request.form()
     files = list(form.getlist("files") or form.getlist("files[]"))
     if not files:
         return {"uploaded": 0}
-    n = await _process_uploaded_files(files, "google_photos")
+    n = await _process_uploaded_files(files, source)
     return {"uploaded": n}
 
 

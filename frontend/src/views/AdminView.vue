@@ -290,7 +290,7 @@ function initUppyWhenReady() {
         note: "Pick videos from Google Photos to add to the baby timeline. Only videos are accepted."
       })
       .use(XHRUpload, {
-        endpoint: `${apiBase}/admin/upload`,
+        endpoint: `${apiBase}/admin/upload-companion`,
         fieldName: "files",
         formData: true,
         bundle: false,
