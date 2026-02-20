@@ -83,7 +83,7 @@
       <section v-if="googlePhotosSection" class="rounded-xl border border-slate-800 bg-slate-900/70 p-6">
         <h2 class="text-sm font-semibold text-rose-200/90 mb-3">Import from Google Photos</h2>
         <template v-if="useUppyPicker">
-          <p class="text-sm text-slate-400 mb-3">Pick photos or videos below, then click Upload. Files are sent to the hatch-sync timeline.</p>
+          <p class="text-sm text-slate-400 mb-3">Pick videos below, then click Upload. Only videos from Google Photos are accepted.</p>
           <div :id="uppyContainerId" class="uppy-dashboard-container mt-2"></div>
           <p v-if="uppyUploadMessage" class="mt-2 text-sm" :class="uppyUploadError ? 'text-rose-300' : 'text-slate-400'">{{ uppyUploadMessage }}</p>
         </template>
@@ -274,7 +274,10 @@ function initUppyWhenReady() {
   nextTick(() => {
     const el = document.getElementById(uppyContainerId);
     if (!el) return;
-    const uppy = new Uppy({ restrictions: { maxNumberOfFiles: 50 }, autoProceed: false })
+    const uppy = new Uppy({
+        restrictions: { maxNumberOfFiles: 50, allowedFileTypes: ["video/*"] },
+        autoProceed: false
+      })
       .use(GooglePhotosPicker, { companionUrl, clientId, companionCookiesRule: "same-origin" })
       .use(Dashboard, {
         inline: true,
@@ -283,7 +286,7 @@ function initUppyWhenReady() {
         showProgressDetails: true,
         width: "100%",
         height: 380,
-        note: "Pick photos or videos from Google Photos to add to the baby timeline."
+        note: "Pick videos from Google Photos to add to the baby timeline. Only videos are accepted."
       })
       .use(XHRUpload, {
         endpoint: `${apiBase}/admin/upload`,
