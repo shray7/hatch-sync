@@ -63,6 +63,10 @@ fi
 if [ -n "${SESSION_SECRET:-}" ]; then
   SECRETS_ARR+=("session-secret=$SESSION_SECRET")
 fi
+if [ -n "${COMPANION_UPLOAD_SECRET:-}" ]; then
+  SECRETS_ARR+=("companion-upload-secret=$COMPANION_UPLOAD_SECRET")
+  echo "Including COMPANION_UPLOAD_SECRET for /admin/upload-companion."
+fi
 
 echo "Setting secrets on Container App '$APP_NAME' in resource group '$RESOURCE_GROUP'..."
 az containerapp secret set \
@@ -115,6 +119,9 @@ if [ -n "${API_BASE_URL:-}" ]; then
 fi
 if [ -n "${FRONTEND_URL:-}" ]; then
   env_vars+=("FRONTEND_URL=$FRONTEND_URL")
+fi
+if [ -n "${COMPANION_UPLOAD_SECRET:-}" ]; then
+  env_vars+=("COMPANION_UPLOAD_SECRET=secretref:companion-upload-secret")
 fi
 
 az containerapp update \

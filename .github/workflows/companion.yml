@@ -1,0 +1,150 @@
+# Build and deploy Uppy Companion (Google Photos Picker) to Azure Container Apps.
+# Requires: AZURE_CREDENTIALS, COMPANION_UPLOAD_SECRET (same as API).
+# Optional: COMPANION_CLIENT_ORIGINS (defaults to FRONTEND_URL), COMPANION_GOOGLE_KEY, COMPANION_GOOGLE_SECRET.
+name: Companion (Azure)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "companion/**"
+      - ".github/workflows/companion.yml"
+
+env:
+  AZURE_RESOURCE_GROUP: hatchsync
+  AZURE_CONTAINERAPPS_ENV: hatchsync-env
+  AZURE_CONTAINERAPP_NAME: hatch-sync-api
+  COMPANION_APP_NAME: hatch-sync-companion
+  ACR_NAME: hatchsyncacr
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get API and env info
+        id: env
+        run: |
+          API_FQDN=$(az containerapp show \
+            --name ${{ env.AZURE_CONTAINERAPP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          DEFAULT_DOMAIN=$(az containerapp env show \
+            --name ${{ env.AZURE_CONTAINERAPPS_ENV }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query properties.defaultDomain -o tsv)
+          COMPANION_FQDN="${COMPANION_APP_NAME}.${DEFAULT_DOMAIN}"
+          echo "API_FQDN=${API_FQDN}" >> $GITHUB_OUTPUT
+          echo "COMPANION_FQDN=${COMPANION_FQDN}" >> $GITHUB_OUTPUT
+          echo "API URL: https://${API_FQDN}"
+          echo "Companion FQDN: ${COMPANION_FQDN}"
+
+      - name: Build and push Companion image
+        run: |
+          az acr build \
+            --registry ${{ env.ACR_NAME }} \
+            --image hatch-sync-companion:${{ github.sha }} \
+            --image hatch-sync-companion:latest \
+            --file companion/Dockerfile \
+            companion/
+
+      - name: Get ACR credentials
+        id: acr
+        run: |
+          ACR_USER=$(az acr credential show --name ${{ env.ACR_NAME }} --query username -o tsv)
+          ACR_PASS=$(az acr credential show --name ${{ env.ACR_NAME }} --query "passwords[0].value" -o tsv)
+          echo "username=${ACR_USER}" >> $GITHUB_OUTPUT
+          echo "password=${ACR_PASS}" >> $GITHUB_OUTPUT
+
+      - name: Set Companion env vars
+        id: companion_env
+        env:
+          UPLOAD_SECRET: ${{ secrets.COMPANION_UPLOAD_SECRET }}
+          CLIENT_ORIGINS: ${{ vars.COMPANION_CLIENT_ORIGINS || vars.FRONTEND_URL || 'https://shray7.github.io' }}
+          GOOGLE_KEY: ${{ secrets.COMPANION_GOOGLE_KEY }}
+          GOOGLE_SECRET: ${{ secrets.COMPANION_GOOGLE_SECRET }}
+        run: |
+          CLIENT_ORIGINS="${CLIENT_ORIGINS:-https://shray7.github.io}"
+          UPLOAD_URLS="https://${{ steps.env.outputs.API_FQDN }}/admin/upload-companion"
+          UPLOAD_HEADERS=""
+          if [ -n "$UPLOAD_SECRET" ]; then
+            UPLOAD_HEADERS=$(printf '%s' "{\"X-Companion-Secret\":\"$UPLOAD_SECRET\"}" | jq -c .)
+          fi
+          echo "COMPANION_UPLOAD_URLS=${UPLOAD_URLS}" >> $GITHUB_ENV
+          echo "COMPANION_UPLOAD_HEADERS=${UPLOAD_HEADERS}" >> $GITHUB_ENV
+          echo "COMPANION_DOMAIN=${{ steps.env.outputs.COMPANION_FQDN }}" >> $GITHUB_ENV
+          echo "COMPANION_CLIENT_ORIGINS=${CLIENT_ORIGINS}" >> $GITHUB_ENV
+          if [ -n "$GOOGLE_KEY" ] && [ -n "$GOOGLE_SECRET" ]; then
+            echo "COMPANION_GOOGLE_KEY=${GOOGLE_KEY}" >> $GITHUB_ENV
+            echo "COMPANION_GOOGLE_SECRET=${GOOGLE_SECRET}" >> $GITHUB_ENV
+          fi
+
+      - name: Create or update Companion container app
+        env:
+          COMPANION_SECRET: ${{ secrets.COMPANION_SECRET || 'companion-secret-change-in-production' }}
+        run: |
+          ENV_ID=$(az containerapp env show \
+            --name ${{ env.AZURE_CONTAINERAPPS_ENV }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query id -o tsv)
+          IMAGE="${{ env.ACR_NAME }}.azurecr.io/hatch-sync-companion:${{ github.sha }}"
+          ENV_VARS=(
+            "COMPANION_DOMAIN=${{ steps.env.outputs.COMPANION_FQDN }}"
+            "COMPANION_PROTOCOL=https"
+            "COMPANION_SECRET=${COMPANION_SECRET}"
+            "COMPANION_DATADIR=/tmp/companion"
+            "COMPANION_CLIENT_ORIGINS=${{ env.COMPANION_CLIENT_ORIGINS }}"
+            "COMPANION_UPLOAD_URLS=${{ env.COMPANION_UPLOAD_URLS }}"
+            "COMPANION_ENABLE_GOOGLE_PICKER_ENDPOINT=true"
+          )
+          if [ -n "${{ env.COMPANION_UPLOAD_HEADERS }}" ]; then
+            ENV_VARS+=("COMPANION_UPLOAD_HEADERS=${{ env.COMPANION_UPLOAD_HEADERS }}")
+          fi
+          if [ -n "${{ env.COMPANION_GOOGLE_KEY }}" ]; then
+            ENV_VARS+=("COMPANION_GOOGLE_KEY=${{ env.COMPANION_GOOGLE_KEY }}")
+          fi
+          if [ -n "${{ env.COMPANION_GOOGLE_SECRET }}" ]; then
+            ENV_VARS+=("COMPANION_GOOGLE_SECRET=${{ env.COMPANION_GOOGLE_SECRET }}")
+          fi
+          if az containerapp show --name ${{ env.COMPANION_APP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} &>/dev/null; then
+            echo "Updating existing Companion app..."
+            az containerapp update \
+              --name ${{ env.COMPANION_APP_NAME }} \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --image "$IMAGE" \
+              --set-env-vars "${ENV_VARS[@]}"
+          else
+            echo "Creating Companion container app..."
+            az containerapp create \
+              --name ${{ env.COMPANION_APP_NAME }} \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --environment "$ENV_ID" \
+              --image "$IMAGE" \
+              --target-port 3020 \
+              --ingress external \
+              --registry-server ${{ env.ACR_NAME }}.azurecr.io \
+              --registry-username ${{ steps.acr.outputs.username }} \
+              --registry-password ${{ steps.acr.outputs.password }} \
+              --set-env-vars "${ENV_VARS[@]}"
+          fi
+
+      - name: Output Companion URL
+        run: |
+          FQDN=$(az containerapp show \
+            --name ${{ env.COMPANION_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "Companion URL: https://${FQDN}"
+          echo "Set VITE_COMPANION_URL=https://${FQDN} and VITE_GOOGLE_CLIENT_ID in repo vars, then rebuild frontend."

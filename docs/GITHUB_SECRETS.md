@@ -21,6 +21,23 @@ Do not commit `.env`, `service_account.json`, or the AZURE_CREDENTIALS JSON.
 | Variable | Description |
 |----------|-------------|
 | **VITE_BASE_URL** | Override base path for GitHub Pages. Default is `/<repo-name>/` (e.g. `/hatch-sync/`). Only set if your repo name or Pages URL differs. |
+| **VITE_COMPANION_URL** | After deploying Companion (see below), set to `https://hatch-sync-companion.<your-env>.azurecontainerapps.io`. Used with **VITE_GOOGLE_CLIENT_ID** for the Google Photos Picker in Admin. |
+| **VITE_GOOGLE_CLIENT_ID** | Google OAuth 2.0 Web client ID for the Picker (add your frontend origin to Authorized JavaScript origins; enable **Google Photos Picker API** in the same project). |
+
+---
+
+## Companion (Google Photos Picker) on Azure
+
+1. **Secrets** (Settings → Secrets and variables → Actions):
+   - **COMPANION_UPLOAD_SECRET**: A long random string. Use the **same value** when running `./scripts/azure-set-secrets.sh` so the API accepts uploads from Companion.
+   - Optional: **COMPANION_GOOGLE_KEY** and **COMPANION_GOOGLE_SECRET** (Google OAuth for server-side; can leave unset and rely on clientId from frontend).
+   - Optional: **COMPANION_SECRET**: Secret for Companion’s own signing (defaults to a placeholder if unset).
+
+2. **API**: Run `azure-set-secrets.sh` with `COMPANION_UPLOAD_SECRET=<same value>` so the API has `COMPANION_UPLOAD_SECRET` set.
+
+3. **Deploy Companion**: Push `companion/` changes or run the **Companion (Azure)** workflow. It builds the Companion image, creates the `hatch-sync-companion` Container App if needed, and deploys.
+
+4. **Repo variables** (Settings → Variables): Set **VITE_COMPANION_URL** = `https://hatch-sync-companion.<env-default-domain>` (see workflow run output for the exact URL) and **VITE_GOOGLE_CLIENT_ID** = your Google OAuth client ID. Then re-run the **Frontend (GitHub Pages)** workflow so the build includes the Picker.
 
 ---
 
