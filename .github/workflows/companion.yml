@@ -137,7 +137,7 @@ jobs:
               --registry-server ${{ env.ACR_NAME }}.azurecr.io \
               --registry-username ${{ steps.acr.outputs.username }} \
               --registry-password ${{ steps.acr.outputs.password }} \
-              --set-env-vars "${ENV_VARS[@]}"
+              --env-vars "${ENV_VARS[@]}"
           fi
 
       - name: Output Companion URL
