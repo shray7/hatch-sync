@@ -55,12 +55,14 @@
         title="Diapers per day (last 14 days)"
         :labels="diapersPerDay.labels"
         :data="diapersPerDay.values"
+        :moving-average-window="7"
         class="animate-fade-slide-up"
       />
       <TimeSeriesChart
         title="Feedings per day (last 14 days)"
         :labels="feedingsPerDay.labels"
         :data="feedingsPerDay.values"
+        :moving-average-window="7"
         class="animate-fade-slide-up"
       />
       <TimeSeriesChart
@@ -68,6 +70,7 @@
         title="Weight over time (lb)"
         :labels="weightOverTime.labels"
         :data="weightOverTime.valuesLbs"
+        :moving-average-window="3"
         class="animate-fade-slide-up"
       />
     </section>

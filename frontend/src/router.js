@@ -6,7 +6,6 @@ import WeightView from "./views/WeightView.vue";
 import PhotosView from "./views/PhotosView.vue";
 import VideosView from "./views/VideosView.vue";
 import AdminView from "./views/AdminView.vue";
-
 const routes = [
   { path: "/", name: "dashboard", component: DashboardView },
   { path: "/feedings", name: "feedings", component: FeedingsView },

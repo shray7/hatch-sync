@@ -79,13 +79,49 @@
           <p v-if="uploadDetails" class="text-xs text-slate-500">{{ uploadDetails }}</p>
         </div>
       </section>
+
+      <section class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70 p-6">
+        <h2 class="text-sm font-semibold text-rose-200/90 mb-3">Health</h2>
+        <p class="mb-4 text-xs text-slate-400">API, database, Redis, and blob storage status.</p>
+        <div v-if="healthLoading" class="flex items-center gap-2 py-4">
+          <span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-500 border-t-rose-400" />
+          <span class="text-sm text-slate-400">Checking…</span>
+        </div>
+        <div v-else-if="healthError" class="text-sm text-rose-300">{{ healthError }}</div>
+        <div v-else class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div
+            v-for="item in healthItems"
+            :key="item.key"
+            class="rounded-lg border p-3"
+            :class="item.statusClass"
+          >
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-medium text-slate-200">{{ item.label }}</span>
+              <span
+                class="rounded-full px-2 py-0.5 text-xs font-medium"
+                :class="item.badgeClass"
+              >{{ item.status }}</span>
+            </div>
+            <p class="mt-0.5 text-xs text-slate-500">{{ item.description }}</p>
+          </div>
+        </div>
+        <button
+          v-if="health"
+          type="button"
+          class="mt-3 rounded border border-slate-600 px-2 py-1 text-xs text-slate-400 hover:bg-slate-800"
+          @click="refreshHealth"
+        >
+          Refresh
+        </button>
+      </section>
     </template>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { getAuthLoginUrl, fetchAuthMe, authLogout, triggerSync, uploadFiles } from "../api/auth";
+import { fetchHealth } from "../api/health";
 
 
 const authStatus = ref("loading");
@@ -100,6 +136,38 @@ const uploadProgress = ref("");
 const uploadMessage = ref("");
 const uploadDetails = ref("");
 const uploadError = ref(false);
+
+const health = ref(null);
+const healthLoading = ref(false);
+const healthError = ref(null);
+const statusConfig = {
+  ok: { statusClass: "border-emerald-900/40 bg-emerald-950/20", badgeClass: "bg-emerald-500/20 text-emerald-300" },
+  disabled: { statusClass: "border-slate-700/50 bg-slate-900/30", badgeClass: "bg-slate-600/30 text-slate-400" },
+  unavailable: { statusClass: "border-rose-900/40 bg-rose-950/20", badgeClass: "bg-rose-500/20 text-rose-300" }
+};
+const healthItems = computed(() => {
+  if (!health.value) return [];
+  const h = health.value;
+  const cfg = (s) => statusConfig[s] || statusConfig.disabled;
+  return [
+    { key: "api", label: "API", status: h.api ?? "ok", description: "FastAPI backend", ...cfg(h.api ?? "ok") },
+    { key: "redis", label: "Redis", status: h.redis ?? "unknown", description: "Cache", ...cfg(h.redis ?? "disabled") },
+    { key: "database", label: "Database", status: h.database ?? "unknown", description: "PostgreSQL", ...cfg(h.database ?? "disabled") },
+    { key: "blob", label: "Blob storage", status: h.blob ?? "unknown", description: "Azure (photos & videos)", ...cfg(h.blob ?? "disabled") }
+  ];
+});
+
+async function refreshHealth() {
+  healthLoading.value = true;
+  healthError.value = null;
+  try {
+    health.value = await fetchHealth();
+  } catch (e) {
+    healthError.value = e.response?.data?.detail ?? e.message ?? "Failed to fetch health";
+  } finally {
+    healthLoading.value = false;
+  }
+}
 
 async function checkAuth() {
   authStatus.value = "loading";
@@ -173,7 +241,8 @@ async function onDeviceUpload(event) {
   }
 }
 
-onMounted(() => {
-  checkAuth();
+onMounted(async () => {
+  await checkAuth();
+  if (authStatus.value === "authenticated") refreshHealth();
 });
 </script>

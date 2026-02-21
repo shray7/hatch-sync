@@ -17,6 +17,7 @@
         title="Diapers per day"
         :labels="diapersPerDay.labels"
         :data="diapersPerDay.values"
+        :moving-average-window="7"
       />
       <ColumnChart
         title="Type breakdown (last 14 days)"

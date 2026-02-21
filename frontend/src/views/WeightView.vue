@@ -14,6 +14,7 @@
         title="Weight over time (lb)"
         :labels="weightOverTime.labels"
         :data="weightOverTime.valuesLbs"
+        :moving-average-window="3"
       />
       <div class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70 p-4">
         <div class="mb-2 text-sm font-medium text-slate-200">

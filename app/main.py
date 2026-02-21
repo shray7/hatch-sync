@@ -33,15 +33,16 @@ from app.auth import (
     verify_google_id_token,
 )
 from app.cache import redis_health
-from app.azure_blob import delete_blob, upload_blob
+from app.azure_blob import blob_health, delete_blob, upload_blob
 from app.db import (
+    close_pool,
+    db_health,
     delete_photo as db_delete_photo,
     get_first_baby,
     get_grow_data,
     get_photos as get_photos_from_db,
     get_photos_for_baby_hatch_id,
     init_pool,
-    close_pool,
     insert_uploaded_photo,
     upsert_baby,
     upsert_diapers,
@@ -222,14 +223,19 @@ async def root():
 
 @app.get("/health")
 async def health():
-    """Health check, including Redis cache status and whether Hatch env vars are set (no values exposed)."""
+    """Health check: API, Redis, DB, Blob. No secrets exposed."""
     redis_status = await redis_health()
+    db_status = await db_health()
+    blob_status = await blob_health()
     email = os.environ.get("HATCH_EMAIL", "").strip()
     password = os.environ.get("HATCH_PASSWORD", "").strip()
     hatch_configured = bool(email and password)
     return {
         "status": "ok",
+        "api": "ok",
         "redis": redis_status,
+        "database": db_status,
+        "blob": blob_status,
         "hatch_configured": hatch_configured,
     }
 

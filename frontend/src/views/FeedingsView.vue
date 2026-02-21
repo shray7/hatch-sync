@@ -17,11 +17,13 @@
         title="Feedings per day"
         :labels="feedingsPerDay.labels"
         :data="feedingsPerDay.values"
+        :moving-average-window="7"
       />
       <TimeSeriesChart
         title="Total volume per day (g)"
         :labels="volumePerDay.labels"
         :data="volumePerDay.values"
+        :moving-average-window="7"
       />
     </section>
 

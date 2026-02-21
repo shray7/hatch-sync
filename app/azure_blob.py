@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Optional
 
@@ -127,4 +128,21 @@ async def delete_blob(name: str) -> bool:
         except Exception:
             continue
     return False
+
+
+async def blob_health(timeout_seconds: float = 5.0) -> str:
+    """
+    Lightweight health check for Azure Blob Storage.
+    Returns: "ok", "disabled", or "unavailable".
+    """
+    conn = os.environ.get("AZURE_BLOB_CONNECTION_STRING", "").strip()
+    if not conn or "placeholder" in conn.lower() or "AccountKey=placeholder" in conn:
+        return "disabled"
+    try:
+        client = BlobServiceClient.from_connection_string(conn)
+        await asyncio.wait_for(client.get_service_properties(), timeout=timeout_seconds)
+        await client.close()
+        return "ok"
+    except Exception:
+        return "unavailable"
 

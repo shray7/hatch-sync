@@ -56,6 +56,22 @@ async def close_pool() -> None:
         _pool = None
 
 
+async def db_health(timeout_seconds: float = 3.0) -> str:
+    """
+    Lightweight health check for PostgreSQL.
+    Returns: "ok", "disabled", or "unavailable".
+    """
+    import asyncio
+    if not DATABASE_URL or _pool is None:
+        return "disabled"
+    try:
+        async with _pool.acquire() as conn:
+            await asyncio.wait_for(conn.fetchval("SELECT 1"), timeout=timeout_seconds)
+        return "ok"
+    except Exception:
+        return "unavailable"
+
+
 def _parse_sql_statements(sql: str) -> list[str]:
     """Split SQL into executable statements (by semicolon), stripping comments and blanks."""
     statements = []
