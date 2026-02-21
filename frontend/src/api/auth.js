@@ -65,10 +65,7 @@ export async function uploadFiles(files) {
   for (let i = 0; i < files.length; i++) {
     formData.append("files", files[i]);
   }
-  const res = await axiosWithCreds.post("/admin/upload", formData, {
-    timeout: 120000,
-    headers: { "Content-Type": "multipart/form-data" }
-  });
+  const res = await axiosWithCreds.post("/admin/upload", formData, { timeout: 120000 });
   return res.data;
 }
 
