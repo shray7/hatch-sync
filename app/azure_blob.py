@@ -7,7 +7,10 @@ from azure.storage.blob.aio import BlobServiceClient, ContainerClient
 
 
 _blob_service_client: Optional[BlobServiceClient] = None
-_container_client: Optional[ContainerClient] = None
+_photo_container_client: Optional[ContainerClient] = None
+_video_container_client: Optional[ContainerClient] = None
+
+_VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm")
 
 
 def _get_connection_string() -> str:
@@ -19,7 +22,7 @@ def _get_connection_string() -> str:
     return conn
 
 
-def _get_container_name() -> str:
+def _get_photo_container_name() -> str:
     name = os.environ.get("AZURE_BLOB_CONTAINER", "").strip()
     if not name:
         raise RuntimeError(
@@ -28,64 +31,100 @@ def _get_container_name() -> str:
     return name
 
 
-async def get_container_client() -> ContainerClient:
-    """
-    Return a cached async ContainerClient for the configured container.
+def _get_video_container_name() -> str:
+    return os.environ.get("AZURE_BLOB_VIDEO_CONTAINER", "").strip() or "hatch-videos"
 
-    Uses AZURE_BLOB_CONNECTION_STRING + AZURE_BLOB_CONTAINER.
+
+def _is_video_key(key: str) -> bool:
+    k = (key or "").lower()
+    return any(k.endswith(ext) for ext in _VIDEO_EXTENSIONS)
+
+
+async def _get_container_client(container_name: str) -> ContainerClient:
     """
-    global _blob_service_client, _container_client
-    if _container_client is not None:
-        return _container_client
+    Return a cached async ContainerClient for the given container name.
+    """
+    global _blob_service_client, _photo_container_client, _video_container_client
+
+    is_video = container_name == _get_video_container_name()
+    cached = _video_container_client if is_video else _photo_container_client
+    if cached is not None:
+        return cached
 
     conn_str = _get_connection_string()
-    container_name = _get_container_name()
-
     if _blob_service_client is None:
         _blob_service_client = BlobServiceClient.from_connection_string(conn_str)
 
-    _container_client = _blob_service_client.get_container_client(container_name)
-    # Ensure container exists (idempotent)
+    client = _blob_service_client.get_container_client(container_name)
     try:
-        await _container_client.create_container()
+        await client.create_container()
     except Exception:
-        # Already exists or cannot be created; let actual upload/read fail if misconfigured
         pass
-    return _container_client
+
+    if is_video:
+        _video_container_client = client
+    else:
+        _photo_container_client = client
+    return client
 
 
-async def upload_blob(name: str, data: bytes, content_type: str = "image/jpeg") -> None:
+async def upload_blob(
+    name: str,
+    data: bytes,
+    content_type: str = "image/jpeg",
+    *,
+    is_video: bool = False,
+) -> None:
     """
-    Upload bytes to the configured container under the given blob name.
+    Upload bytes to the photo or video container under the given blob name.
     Overwrites if the blob already exists.
     """
-    container = await get_container_client()
+    container_name = _get_video_container_name() if is_video else _get_photo_container_name()
+    container = await _get_container_client(container_name)
     blob_client = container.get_blob_client(name)
     await blob_client.upload_blob(data, overwrite=True, content_type=content_type)
 
 
 async def download_blob(name: str) -> Optional[bytes]:
     """
-    Download bytes from the configured container. Returns None if the blob does not exist.
+    Download bytes from the appropriate container (photo or video based on key extension).
+    For video keys, tries the video container first, then the photo container (backwards compat).
+    Returns None if the blob does not exist.
     """
-    container = await get_container_client()
-    blob_client = container.get_blob_client(name)
-    try:
-        stream = await blob_client.download_blob()
-        return await stream.readall()
-    except Exception:
-        return None
+    if _is_video_key(name):
+        containers = [_get_video_container_name(), _get_photo_container_name()]
+    else:
+        containers = [_get_photo_container_name()]
+
+    for container_name in containers:
+        container = await _get_container_client(container_name)
+        blob_client = container.get_blob_client(name)
+        try:
+            stream = await blob_client.download_blob()
+            return await stream.readall()
+        except Exception:
+            continue
+    return None
 
 
 async def delete_blob(name: str) -> bool:
     """
-    Delete a blob by name. Returns True if deleted, False if blob did not exist.
+    Delete a blob by name from the appropriate container.
+    For video keys, tries the video container first, then the photo container (backwards compat).
+    Returns True if deleted, False if blob did not exist in either container.
     """
-    container = await get_container_client()
-    blob_client = container.get_blob_client(name)
-    try:
-        await blob_client.delete_blob()
-        return True
-    except Exception:
-        return False
+    if _is_video_key(name):
+        containers = [_get_video_container_name(), _get_photo_container_name()]
+    else:
+        containers = [_get_photo_container_name()]
+
+    for container_name in containers:
+        container = await _get_container_client(container_name)
+        blob_client = container.get_blob_client(name)
+        try:
+            await blob_client.delete_blob()
+            return True
+        except Exception:
+            continue
+    return False
 

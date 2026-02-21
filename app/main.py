@@ -452,7 +452,7 @@ async def _process_uploaded_files(files: list[UploadFile], source: str) -> int:
                 continue
             ext, content_type, media_type = _ext_and_media_from_file(uf, data)
             key = f"baby/{hatch_id}/uploads/{uuid.uuid4().hex}{ext}"
-            await upload_blob(key, data, content_type=content_type)
+            await upload_blob(key, data, content_type=content_type, is_video=(media_type == "video"))
             await insert_uploaded_photo(
                 internal_id,
                 key,

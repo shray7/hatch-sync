@@ -27,9 +27,10 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
-# Optional: Azure Blob for photo storage (if unset, use placeholder so secret set succeeds; replace later in portal)
+# Optional: Azure Blob for photo and video storage (if unset, use placeholder so secret set succeeds; replace later in portal)
 AZURE_BLOB_CONNECTION_STRING="${AZURE_BLOB_CONNECTION_STRING:-DefaultEndpointsProtocol=https;AccountName=placeholder;AccountKey=placeholder;EndpointSuffix=core.windows.net}"
 AZURE_BLOB_CONTAINER="${AZURE_BLOB_CONTAINER:-hatch-photos}"
+AZURE_BLOB_VIDEO_CONTAINER="${AZURE_BLOB_VIDEO_CONTAINER:-hatch-videos}"
 
 echo "Getting Redis URL from Container Apps environment..."
 ENV_DEFAULT_DOMAIN=$(az containerapp env show \
@@ -78,6 +79,7 @@ env_vars=(
   "HATCH_CACHE_REFRESH_MINUTES=${HATCH_CACHE_REFRESH_MINUTES:-15}"
   "AZURE_BLOB_CONNECTION_STRING=secretref:azure-blob-connection-string"
   "AZURE_BLOB_CONTAINER=$AZURE_BLOB_CONTAINER"
+  "AZURE_BLOB_VIDEO_CONTAINER=$AZURE_BLOB_VIDEO_CONTAINER"
   "GOOGLE_SERVICE_ACCOUNT_FILE=/app/service_account.json"
   "HATCH_EMAIL=secretref:hatch-email"
   "HATCH_PASSWORD=secretref:hatch-password"

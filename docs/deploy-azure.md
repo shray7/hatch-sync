@@ -79,6 +79,26 @@ DATABASE_URL='postgresql://hatchsync:PASSWORD@hatchsync-pg.postgres.database.azu
 
 The set-secrets script adds `database-url` to the Container App secrets and sets `DATABASE_URL=secretref:database-url` and `HATCH_TIMEZONE=America/Los_Angeles` (unless you set `HATCH_TIMEZONE` yourself).
 
+### 1.2b (Optional) Blob Storage for photos and videos
+
+Admin device uploads and Hatch Grow photos/videos are stored in Azure Blob Storage. Without this, the Admin upload and `/grow/photos` serving will fail.
+
+```bash
+chmod +x scripts/azure-setup-blob.sh
+./scripts/azure-setup-blob.sh westus2
+```
+
+The script creates a Storage Account and two blob containers: `hatch-photos` (photos) and `hatch-videos` (videos). It prints `AZURE_BLOB_CONNECTION_STRING`. Pass it to `azure-set-secrets.sh`:
+
+```bash
+AZURE_BLOB_CONNECTION_STRING='DefaultEndpointsProtocol=https;...' AZURE_BLOB_CONTAINER=hatch-photos AZURE_BLOB_VIDEO_CONTAINER=hatch-videos \
+  HATCH_EMAIL=... HATCH_PASSWORD=... ... ./scripts/azure-set-secrets.sh
+```
+
+If you skip this step, `azure-set-secrets.sh` uses a placeholder connection string; replace it later in the Container App (Azure Portal → Environment variables) or re-run set-secrets with the real values.
+
+**Storage account name:** The default `hatchsyncsa` must be globally unique. If it's taken, set `AZURE_STORAGE_ACCOUNT=your-unique-name` before running the script.
+
 ### 1.3 Service principal for GitHub Actions
 
 Create a service principal scoped to the **hatchsync** resource group so the workflow can push images to ACR and update the Container App:

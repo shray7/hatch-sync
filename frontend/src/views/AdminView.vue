@@ -68,9 +68,16 @@
         <p v-if="syncMessage" class="mt-3 text-sm" :class="syncError ? 'text-rose-300' : 'text-slate-400'">
           {{ syncMessage }}
         </p>
-        <p v-if="uploadMessage" class="mt-3 text-sm" :class="uploadError ? 'text-rose-300' : 'text-slate-400'">
-          {{ uploadMessage }}
-        </p>
+        <div v-if="uploading" class="mt-3 flex items-center gap-2 text-sm text-slate-400">
+          <span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-500 border-t-rose-400" />
+          {{ uploadProgress }}
+        </div>
+        <div v-else-if="uploadMessage" class="mt-3 space-y-1">
+          <p class="text-sm" :class="uploadError ? 'text-rose-300' : 'text-slate-400'">
+            {{ uploadMessage }}
+          </p>
+          <p v-if="uploadDetails" class="text-xs text-slate-500">{{ uploadDetails }}</p>
+        </div>
       </section>
     </template>
   </div>
@@ -88,7 +95,10 @@ const authLoginUrl = getAuthLoginUrl("/admin");
 const syncing = ref(false);
 const syncMessage = ref("");
 const syncError = ref(false);
+const uploading = ref(false);
+const uploadProgress = ref("");
 const uploadMessage = ref("");
+const uploadDetails = ref("");
 const uploadError = ref(false);
 
 async function checkAuth() {
@@ -131,15 +141,35 @@ async function runSync() {
 async function onDeviceUpload(event) {
   const files = event.target?.files;
   if (!files?.length) return;
+  const fileList = Array.from(files);
+  const names = fileList.map((f) => f.name || "file").join(", ");
   uploadMessage.value = "";
+  uploadDetails.value = "";
   uploadError.value = false;
+  uploading.value = true;
+  uploadProgress.value = `Uploading ${fileList.length} file(s)…`;
   try {
-    await uploadFiles(Array.from(files));
-    uploadMessage.value = `Uploaded ${files.length} file(s).`;
+    const result = await uploadFiles(fileList);
+    const n = result?.uploaded ?? 0;
+    if (n === fileList.length) {
+      uploadMessage.value = `Uploaded ${n} file(s).`;
+      uploadDetails.value = names;
+    } else if (n > 0) {
+      uploadMessage.value = `Uploaded ${n} of ${fileList.length} file(s).`;
+      uploadDetails.value = names;
+    } else {
+      uploadError.value = true;
+      uploadMessage.value = "No files were uploaded. Try again or check the browser console.";
+      uploadDetails.value = names;
+    }
     event.target.value = "";
   } catch (err) {
     uploadError.value = true;
     uploadMessage.value = err.response?.data?.detail ?? err.message ?? "Upload failed.";
+    uploadDetails.value = names;
+  } finally {
+    uploading.value = false;
+    uploadProgress.value = "";
   }
 }
 
