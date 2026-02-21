@@ -9,7 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import aiohttp
 import httpx
@@ -384,9 +384,10 @@ async def auth_callback(
         path = "/" + path
     # Include bearer token in URL for mobile/cross-origin (avoids third-party cookie blocking).
     # Frontend stores it and sends Authorization header; cookie still set for same-site browsers.
+    # URL-encode token so +, =, etc. are not corrupted when the URL is parsed.
     token = create_bearer_token(email)
     sep = "&" if "?" in path else "?"
-    redirect_to = f"{frontend_base}{path}{sep}token={token}"
+    redirect_to = f"{frontend_base}{path}{sep}token={quote(token, safe='')}"
     redirect_response = RedirectResponse(url=redirect_to, status_code=302)
     set_session_response(redirect_response, email)
     return redirect_response
