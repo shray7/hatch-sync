@@ -319,6 +319,22 @@ async def insert_uploaded_photo(
         )
 
 
+async def delete_photo(photo_key: str) -> bool:
+    """Delete a photo/video by photo_key. Returns True if a row was deleted."""
+    if not _pool or not photo_key:
+        return False
+    try:
+        async with _pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM photos WHERE photo_key = $1",
+                photo_key.strip(),
+            )
+            return result and result.split()[-1] != "0"
+    except Exception as e:
+        logger.warning("delete_photo failed for %s: %s", photo_key, e)
+        return False
+
+
 # --- API-shaped reads (for /grow/data and /grow/photos) ---
 
 

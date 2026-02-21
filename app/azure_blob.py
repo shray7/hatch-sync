@@ -76,3 +76,16 @@ async def download_blob(name: str) -> Optional[bytes]:
     except Exception:
         return None
 
+
+async def delete_blob(name: str) -> bool:
+    """
+    Delete a blob by name. Returns True if deleted, False if blob did not exist.
+    """
+    container = await get_container_client()
+    blob_client = container.get_blob_client(name)
+    try:
+        await blob_client.delete_blob()
+        return True
+    except Exception:
+        return False
+

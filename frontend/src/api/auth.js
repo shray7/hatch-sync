@@ -33,6 +33,10 @@ axiosWithCreds.interceptors.request.use((config) => {
   return config;
 });
 
+export function getAxiosWithCreds() {
+  return axiosWithCreds;
+}
+
 export function getAuthLoginUrl(nextPath = "/admin") {
   const next = nextPath.startsWith("/") ? nextPath : `/${nextPath}`;
   return `${apiBase}/auth/google?next=${encodeURIComponent(next)}`;

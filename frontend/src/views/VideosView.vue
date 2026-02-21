@@ -1,15 +1,24 @@
 <template>
   <div class="flex w-full flex-col gap-4">
-    <section>
-      <h1 class="text-xl font-semibold tracking-tight text-rose-200/90 md:text-2xl">
-        Videos
-      </h1>
-      <p class="mt-1 text-sm text-slate-400">
-        Videos from Hatch Grow and uploads.
-        <span v-if="loaded && sortedVideos.length > 0" class="text-rose-300/90">
-          {{ sortedVideos.length }} video{{ sortedVideos.length === 1 ? '' : 's' }}.
-        </span>
-      </p>
+    <section class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h1 class="text-xl font-semibold tracking-tight text-rose-200/90 md:text-2xl">
+          Videos
+        </h1>
+        <p class="mt-1 text-sm text-slate-400">
+          Videos from Hatch Grow and uploads.
+          <span v-if="loaded && sortedVideos.length > 0" class="text-rose-300/90">
+            {{ sortedVideos.length }} video{{ sortedVideos.length === 1 ? '' : 's' }}.
+          </span>
+        </p>
+      </div>
+      <router-link
+        v-if="isAdmin"
+        to="/admin"
+        class="self-start rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-700"
+      >
+        Admin
+      </router-link>
     </section>
 
     <section
@@ -59,8 +68,17 @@
             No URL
           </div>
         </div>
-        <div class="px-3 py-2 text-xs text-slate-400">
-          {{ formatDate(video.createDate) }}
+        <div class="flex items-center justify-between gap-2 px-3 py-2">
+          <span class="text-xs text-slate-400">{{ formatDate(video.createDate) }}</span>
+          <button
+            v-if="isAdmin"
+            type="button"
+            class="rounded px-2 py-1 text-xs text-rose-300 hover:bg-rose-950/40 hover:text-rose-200"
+            :disabled="deletingId === video.photoKey"
+            @click="deleteVideo(video)"
+          >
+            {{ deletingId === video.photoKey ? "Deleting…" : "Delete" }}
+          </button>
         </div>
       </div>
     </section>
@@ -77,7 +95,8 @@
 
 <script setup>
 import { computed, onMounted, ref } from "vue";
-import { fetchPhotos } from "../api/grow";
+import { fetchAuthMe } from "../api/auth";
+import { deletePhoto, fetchPhotos } from "../api/grow";
 import { formatDateTimePST } from "../utils/pst";
 
 const allMedia = ref([]);
@@ -85,6 +104,8 @@ const loaded = ref(false);
 const error = ref(null);
 const failedVideos = ref(new Set());
 const rateLimitedStale = ref(false);
+const isAdmin = ref(false);
+const deletingId = ref(null);
 
 function mediaUrl(item) {
   if (!item?.photoKey || !item?.babyId) return null;
@@ -122,7 +143,27 @@ function formatDate(dateStr) {
   return formatDateTimePST(dateStr);
 }
 
+async function deleteVideo(video) {
+  const key = video?.photoKey;
+  if (!key) return;
+  deletingId.value = key;
+  try {
+    await deletePhoto(key);
+    allMedia.value = allMedia.value.filter((m) => (m?.photoKey || m?.photo_key) !== key);
+  } catch (e) {
+    error.value = e.response?.data?.detail ?? e.message ?? "Failed to delete video.";
+  } finally {
+    deletingId.value = null;
+  }
+}
+
 onMounted(async () => {
+  try {
+    await fetchAuthMe();
+    isAdmin.value = true;
+  } catch (_) {
+    isAdmin.value = false;
+  }
   try {
     const data = await fetchPhotos();
     if (data?.rateLimitedStale) rateLimitedStale.value = true;

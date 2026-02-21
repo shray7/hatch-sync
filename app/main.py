@@ -33,8 +33,9 @@ from app.auth import (
     verify_google_id_token,
 )
 from app.cache import redis_health
-from app.azure_blob import upload_blob
+from app.azure_blob import delete_blob, upload_blob
 from app.db import (
+    delete_photo as db_delete_photo,
     get_first_baby,
     get_grow_data,
     get_photos as get_photos_from_db,
@@ -464,6 +465,29 @@ async def admin_upload(
     """Upload one or more photos/videos from device. Admin only."""
     uploaded = await _process_uploaded_files(files, "device")
     return {"uploaded": uploaded}
+
+
+class DeletePhotoBody(BaseModel):
+    photo_key: str
+
+
+@app.post("/admin/photos/delete")
+async def admin_delete_photo(
+    body: DeletePhotoBody,
+    _: str = Depends(require_admin),
+):
+    """Delete a photo or video by photo_key. Admin only. Removes from DB and blob storage."""
+    key = (body.photo_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="photo_key is required")
+    deleted = await db_delete_photo(key)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    try:
+        await delete_blob(key)
+    except Exception as e:
+        logger.warning("admin_delete_photo: blob delete failed for %s: %s", key, e)
+    return {"deleted": True}
 
 
 @app.post("/sync")
