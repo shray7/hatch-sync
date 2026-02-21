@@ -65,6 +65,7 @@ function computeMovingAverage(arr, window) {
 const datasets = () => {
   const labels = props.labels || [];
   const data = props.data || [];
+  const win = props.movingAverageWindow;
   const ds = [
     {
       label: win >= 2 ? "Daily" : undefined,
@@ -76,7 +77,6 @@ const datasets = () => {
       pointRadius: 2
     }
   ];
-  const win = props.movingAverageWindow;
   if (win >= 2 && data.length >= win) {
     const ma = computeMovingAverage(data, win);
     ds.push({
