@@ -46,17 +46,16 @@ On first sync the app creates a calendar named “{Baby name} - Baby Tracker” 
 
 ### Admin and Google sign-in (optional)
 
-To protect admin actions (sync, upload, import from Google Photos) and allow uploading videos or photos from your device or Google Photos:
+To protect admin actions (sync, upload from device) and allow uploading videos or photos from your device:
 
 1. In the same or another Google Cloud project, create an **OAuth 2.0 Client ID** (Web application). Add an authorized redirect URI: `https://<your-api-host>/auth/callback` (e.g. your Azure Container App URL).
-2. Enable **Google Photos Library API** if you want "Import from Google Photos" in the admin UI.
 3. In `.env` set:
    - `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (from the OAuth client).
    - `ADMIN_ALLOWLIST_EMAILS=your@gmail.com` (comma-separated emails who can access admin).
    - `SESSION_SECRET` (a long random string for signing session cookies; optional locally, recommended in production).
    - For cross-origin (e.g. frontend on GitHub Pages): `API_BASE_URL=https://your-api-host` and `FRONTEND_URL=https://your-pages.github.io`.
 
-The frontend **Admin** page shows "Sign in with Google"; only allowlisted users get access to run sync, upload from device, or import from Google Photos. Uploaded media appear in the same Photos timeline as Hatch daily photos and support both images and videos.
+The frontend **Admin** page shows "Sign in with Google"; only allowlisted users get access to run sync and upload from device. Uploaded media appear in the same Photos timeline as Hatch daily photos and support both images and videos.
 
 ## Run
 
@@ -82,8 +81,6 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | POST | `/auth/logout` | Clear session cookie |
 | POST | `/sync` | Run Hatch Grow → Google Calendar sync once (admin only) |
 | POST | `/admin/upload` | Upload photos/videos from device (admin only) |
-| GET | `/admin/google-photos/list` | List Google Photos media (admin only) |
-| POST | `/admin/google-photos/import` | Import selected Google Photos (admin only) |
 
 ## Deployment
 

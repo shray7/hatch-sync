@@ -59,15 +59,6 @@ jobs:
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --image ${{ env.ACR_NAME }}.azurecr.io/hatch-sync-api:${{ github.sha }}
 
-      - name: Set Companion URL for /auth/config
-        run: |
-          if [ -n "${{ vars.VITE_COMPANION_URL }}" ]; then
-            az containerapp update \
-              --name ${{ env.AZURE_CONTAINERAPP_NAME }} \
-              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-              --set-env-vars "COMPANION_PUBLIC_URL=${{ vars.VITE_COMPANION_URL }}"
-          fi
-
       - name: Get API URL and smoke test
         run: |
           FQDN=$(az containerapp show \

@@ -35,7 +35,6 @@ from app.cache import redis_health
 from app.azure_blob import upload_blob
 from app.db import (
     get_first_baby,
-    get_google_refresh_token,
     get_grow_data,
     get_photos as get_photos_from_db,
     get_photos_for_baby_hatch_id,
@@ -55,12 +54,6 @@ from app.hatch_service import (
     get_devices,
     set_audio_track,
     set_volume,
-)
-from app.google_photos import (
-    batch_get_media_items,
-    download_media_bytes,
-    get_download_url,
-    list_media_items,
 )
 from app.hatch_grow_service import (
     fetch_diapers,
@@ -334,10 +327,8 @@ def _oauth_redirect_base(request: Request) -> str:
 
 @app.get("/auth/config")
 async def auth_config():
-    """Return public auth config (e.g. Google OAuth client_id, Companion URL for frontend Picker). No secrets."""
-    client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
-    companion_url = os.environ.get("COMPANION_PUBLIC_URL", "").strip()
-    return {"google_client_id": client_id or "", "companion_url": companion_url or ""}
+    """Return public auth config. No secrets."""
+    return {}
 
 
 @app.get("/auth/google")
@@ -469,144 +460,6 @@ async def admin_upload(
     """Upload one or more photos/videos from device. Admin only."""
     uploaded = await _process_uploaded_files(files, "device")
     return {"uploaded": uploaded}
-
-
-def _upload_companion_auth(request: Request) -> tuple[str, str]:
-    """Accept either X-Companion-Secret (from Companion server) or admin session (from browser).
-    Returns (source_label, _) for logging; raises if neither is valid."""
-    secret = os.environ.get("COMPANION_UPLOAD_SECRET", "").strip()
-    if secret and request.headers.get("X-Companion-Secret") == secret:
-        return "google_photos", "companion"
-    try:
-        get_session_email(request)
-        return "device", "browser"
-    except HTTPException:
-        if secret:
-            raise HTTPException(status_code=403, detail="Invalid or missing Companion secret")
-        raise HTTPException(status_code=503, detail="Companion upload not configured")
-
-
-@app.post("/admin/upload-companion")
-async def admin_upload_companion(request: Request):
-    """Accept uploads from Uppy Companion (Google Photos Picker) or direct browser upload.
-    Auth: X-Companion-Secret header (Companion) or admin session cookie (browser).
-    Companion may send files as form field 'files' or 'files[]'."""
-    source, _ = _upload_companion_auth(request)
-    form = await request.form()
-    files = list(form.getlist("files") or form.getlist("files[]"))
-    if not files:
-        return {"uploaded": 0}
-    n = await _process_uploaded_files(files, source)
-    return {"uploaded": n}
-
-
-class GooglePhotosImportBody(BaseModel):
-    media_item_ids: list[str]
-
-
-@app.get("/admin/google-photos/list")
-async def admin_google_photos_list(
-    email: str = Depends(require_admin),
-    page_size: int = Query(50, le=100),
-    page_token: Optional[str] = Query(None),
-):
-    """List media items from the user's Google Photos library. Admin only."""
-    refresh = await get_google_refresh_token(email)
-    if not refresh:
-        raise HTTPException(
-            status_code=400,
-            detail="No Google Photos access. Sign out and sign in again with Google to grant access.",
-        )
-    try:
-        access = await refresh_access_token(refresh)
-    except Exception as e:
-        logger.warning("admin_google_photos_list: refresh failed: %s", e)
-        raise HTTPException(status_code=503, detail="Could not get Google access token")
-    try:
-        data = await list_media_items(access, page_size=page_size, page_token=page_token)
-        return data
-    except httpx.HTTPStatusError as e:
-        # Surface the underlying Google Photos error message to the client.
-        detail = str(e)
-        try:
-            err_json = e.response.json()
-            detail = err_json.get("error", {}).get("message") or detail
-        except Exception:
-            pass
-        logger.warning("admin_google_photos_list: Google Photos API failed: %s", detail)
-        raise HTTPException(status_code=e.response.status_code, detail=f"Google Photos API error: {detail}")
-    except Exception as e:
-        logger.warning("admin_google_photos_list: API failed: %s", e)
-        raise HTTPException(status_code=502, detail=str(e))
-
-
-@app.post("/admin/google-photos/import")
-async def admin_google_photos_import(
-    body: GooglePhotosImportBody,
-    email: str = Depends(require_admin),
-):
-    """Import selected media items from Google Photos into the baby timeline. Admin only."""
-    if not body.media_item_ids:
-        return {"imported": 0}
-    baby = await get_first_baby()
-    if not baby:
-        raise HTTPException(status_code=503, detail="No baby in database.")
-    internal_id, hatch_id = baby
-    refresh = await get_google_refresh_token(email)
-    if not refresh:
-        raise HTTPException(status_code=400, detail="No Google Photos access. Sign in again with Google.")
-    try:
-        access = await refresh_access_token(refresh)
-    except Exception as e:
-        raise HTTPException(status_code=503, detail="Could not get Google access token")
-    items = await batch_get_media_items(access, body.media_item_ids)
-    imported = 0
-    for item in items:
-        mid = item.get("id")
-        base_url = item.get("baseUrl")
-        mime = item.get("mimeType") or ""
-        filename = item.get("filename") or "import"
-        if not base_url:
-            continue
-        url = get_download_url(base_url, mime)
-        data = await download_media_bytes(url)
-        if not data:
-            continue
-        ext = ".jpg"
-        if "video" in mime.lower():
-            ext = ".mp4" if "mp4" in mime.lower() else ".mov"
-        else:
-            if "png" in mime.lower():
-                ext = ".png"
-            elif "gif" in mime.lower():
-                ext = ".gif"
-            elif "webp" in mime.lower():
-                ext = ".webp"
-        key = f"baby/{hatch_id}/uploads/{uuid.uuid4().hex}{ext}"
-        content_type = mime if mime else "image/jpeg"
-        media_type = "video" if "video" in mime.lower() else "photo"
-        try:
-            await upload_blob(key, data, content_type=content_type)
-            creation = item.get("mediaMetadata", {}).get("creationTime")
-            create_dt = datetime.now(timezone.utc)
-            if creation:
-                try:
-                    # Google returns ISO format e.g. 2024-01-15T12:00:00Z
-                    ts = creation.replace("Z", "+00:00")
-                    create_dt = datetime.fromisoformat(ts)
-                except (ValueError, TypeError):
-                    pass
-            await insert_uploaded_photo(
-                internal_id,
-                key,
-                create_dt,
-                source="google_photos",
-                media_type=media_type,
-            )
-            imported += 1
-        except Exception as e:
-            logger.warning("admin_google_photos_import: failed %s: %s", mid, e)
-    return {"imported": imported}
 
 
 @app.post("/sync")

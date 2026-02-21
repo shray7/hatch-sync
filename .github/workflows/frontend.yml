@@ -36,9 +36,6 @@ jobs:
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
           VITE_BASE_URL: ${{ vars.VITE_BASE_URL || format('/{0}/', github.event.repository.name) }}
-          # Google Photos Picker (Uppy Companion). Set vars to enable Import from Google Photos picker.
-          VITE_COMPANION_URL: ${{ vars.VITE_COMPANION_URL }}
-          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
         run: npm run build
 
       - name: SPA 404 fallback

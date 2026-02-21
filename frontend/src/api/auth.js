@@ -18,12 +18,6 @@ export async function fetchAuthMe() {
   return res.data;
 }
 
-/** Public auth config (e.g. google_client_id for Picker). No auth required. */
-export async function fetchAuthConfig() {
-  const res = await axios.get(`${apiBase}/auth/config`, { timeout: 5000 });
-  return res.data;
-}
-
 export async function authLogout() {
   const res = await axiosWithCreds.post("/auth/logout");
   return res.data;
@@ -46,14 +40,3 @@ export async function uploadFiles(files) {
   return res.data;
 }
 
-export async function fetchGooglePhotosList(pageSize = 50, pageToken = null) {
-  const params = { pageSize };
-  if (pageToken) params.pageToken = pageToken;
-  const res = await axiosWithCreds.get("/admin/google-photos/list", { params, timeout: 30000 });
-  return res.data;
-}
-
-export async function importFromGooglePhotos(mediaItemIds) {
-  const res = await axiosWithCreds.post("/admin/google-photos/import", { media_item_ids: mediaItemIds }, { timeout: 120000 });
-  return res.data;
-}
