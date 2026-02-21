@@ -159,7 +159,7 @@ async function onDeviceUpload(event) {
       uploadDetails.value = names;
     } else {
       uploadError.value = true;
-      uploadMessage.value = "No files were uploaded. Try again or check the browser console.";
+      uploadMessage.value = result?.error ?? "No files were uploaded. Try again or check the browser console.";
       uploadDetails.value = names;
     }
     event.target.value = "";

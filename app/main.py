@@ -438,17 +438,20 @@ def _ext_and_media_from_file(uf: UploadFile, data: bytes | None = None) -> tuple
     return ext, content_type, media_type
 
 
-async def _process_uploaded_files(files: list[UploadFile], source: str) -> int:
-    """Process multipart files and store in blob + DB. Returns count uploaded."""
+async def _process_uploaded_files(files: list[UploadFile], source: str) -> tuple[int, str | None]:
+    """Process multipart files and store in blob + DB. Returns (count uploaded, first error or None)."""
     baby = await get_first_baby()
     if not baby:
         raise HTTPException(status_code=503, detail="No baby in database; add Hatch credentials and run sync first.")
     internal_id, hatch_id = baby
     uploaded = 0
+    first_error: str | None = None
     for uf in files:
         try:
             data = await uf.read()
             if not data:
+                if first_error is None:
+                    first_error = "One or more files were empty."
                 continue
             ext, content_type, media_type = _ext_and_media_from_file(uf, data)
             key = f"baby/{hatch_id}/uploads/{uuid.uuid4().hex}{ext}"
@@ -462,8 +465,11 @@ async def _process_uploaded_files(files: list[UploadFile], source: str) -> int:
             )
             uploaded += 1
         except Exception as e:
+            err_msg = str(e)
+            if first_error is None:
+                first_error = err_msg
             logger.warning("upload: failed %s: %s", uf.filename or "file", e)
-    return uploaded
+    return uploaded, first_error
 
 
 @app.post("/admin/upload")
@@ -472,8 +478,11 @@ async def admin_upload(
     files: list[UploadFile] = File(...),
 ):
     """Upload one or more photos/videos from device. Admin only."""
-    uploaded = await _process_uploaded_files(files, "device")
-    return {"uploaded": uploaded}
+    uploaded, first_error = await _process_uploaded_files(files, "device")
+    out: dict = {"uploaded": uploaded}
+    if uploaded == 0 and first_error:
+        out["error"] = first_error
+    return out
 
 
 class DeletePhotoBody(BaseModel):
