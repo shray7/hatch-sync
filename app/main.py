@@ -406,8 +406,8 @@ async def auth_logout(response: Response):
     return {"ok": True}
 
 
-def _ext_and_media_from_file(uf: UploadFile) -> tuple[str, str, str]:
-    """Return (ext, content_type, media_type). Uses filename first, then content_type header."""
+def _ext_and_media_from_file(uf: UploadFile, data: bytes | None = None) -> tuple[str, str, str]:
+    """Return (ext, content_type, media_type). Uses filename, content_type, then magic bytes for mobile robustness."""
     ext = ".jpg"
     content_type = "application/octet-stream"
     media_type = "photo"
@@ -426,6 +426,15 @@ def _ext_and_media_from_file(uf: UploadFile) -> tuple[str, str, str]:
                 ext, content_type = ".webm", "video/webm"
             else:
                 ext, content_type = ".mp4", ct
+    # Mobile browsers often omit filename extension and Content-Type; detect video from magic bytes
+    if media_type == "photo" and data and len(data) >= 12:
+        sig = data[:12]
+        if sig[4:8] in (b"ftyp", b"moov", b"mdat") or sig[8:12] == b"ftyp":
+            media_type, ext, content_type = "video", ".mp4", "video/mp4"
+        elif sig[4:8] == b"wide" or sig[8:12] in (b"mdat", b"moov"):
+            media_type, ext, content_type = "video", ".mov", "video/quicktime"
+        elif sig[:4] == b"\x1a\x45\xdf\xa3":  # EBML (WebM)
+            media_type, ext, content_type = "video", ".webm", "video/webm"
     return ext, content_type, media_type
 
 
@@ -437,12 +446,12 @@ async def _process_uploaded_files(files: list[UploadFile], source: str) -> int:
     internal_id, hatch_id = baby
     uploaded = 0
     for uf in files:
-        ext, content_type, media_type = _ext_and_media_from_file(uf)
-        key = f"baby/{hatch_id}/uploads/{uuid.uuid4().hex}{ext}"
         try:
             data = await uf.read()
             if not data:
                 continue
+            ext, content_type, media_type = _ext_and_media_from_file(uf, data)
+            key = f"baby/{hatch_id}/uploads/{uuid.uuid4().hex}{ext}"
             await upload_blob(key, data, content_type=content_type)
             await insert_uploaded_photo(
                 internal_id,
@@ -453,7 +462,7 @@ async def _process_uploaded_files(files: list[UploadFile], source: str) -> int:
             )
             uploaded += 1
         except Exception as e:
-            logger.warning("upload: failed %s: %s", uf.filename or key, e)
+            logger.warning("upload: failed %s: %s", uf.filename or "file", e)
     return uploaded
 
 
