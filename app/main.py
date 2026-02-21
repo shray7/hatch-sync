@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from app.auth import (
     build_google_auth_url,
     clear_session_response,
+    create_bearer_token,
     exchange_code_for_tokens,
     get_allowlist_emails,
     get_google_client_config,
@@ -380,9 +381,12 @@ async def auth_callback(
     path = (state.strip() or "/admin")
     if not path.startswith("/"):
         path = "/" + path
-    redirect_to = f"{frontend_base}{path}"
+    # Include bearer token in URL for mobile/cross-origin (avoids third-party cookie blocking).
+    # Frontend stores it and sends Authorization header; cookie still set for same-site browsers.
+    token = create_bearer_token(email)
+    sep = "&" if "?" in path else "?"
+    redirect_to = f"{frontend_base}{path}{sep}token={token}"
     redirect_response = RedirectResponse(url=redirect_to, status_code=302)
-    # Attach session cookie to the redirect response so the browser stores it.
     set_session_response(redirect_response, email)
     return redirect_response
 

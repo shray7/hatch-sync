@@ -52,6 +52,16 @@ def create_session_cookie(email: str) -> str:
     return _get_serializer().dumps(payload)
 
 
+def create_bearer_token(email: str) -> str:
+    """Create a signed bearer token for cross-site auth (mobile/cross-origin). Same format as cookie."""
+    return create_session_cookie(email)
+
+
+def load_bearer_token(token: str) -> dict | None:
+    """Verify bearer token and return payload; None if invalid."""
+    return load_session(token)
+
+
 def load_session(cookie_value: str) -> dict | None:
     """Verify and deserialize session cookie; return payload or None if invalid/expired."""
     if not cookie_value:
@@ -67,11 +77,20 @@ def load_session(cookie_value: str) -> dict | None:
 
 def get_session_email(request: Request) -> str:
     """
-    Read session cookie, verify, check allowlist; return email.
+    Read session from cookie or Authorization Bearer token. Cookie works for same-site;
+    Bearer token works for cross-origin/mobile (avoids third-party cookie blocking).
     Raises HTTPException 401 if not authenticated or not allowlisted.
     """
+    payload = None
     cookie_value = request.cookies.get(SESSION_COOKIE_NAME)
-    payload = load_session(cookie_value)
+    if cookie_value:
+        payload = load_session(cookie_value)
+    if not payload:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+            if token:
+                payload = load_bearer_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Not authenticated")
     email = (payload.get("email") or "").strip().lower()
