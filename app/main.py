@@ -467,6 +467,8 @@ async def _process_uploaded_files(files: list[UploadFile], source: str) -> tuple
             uploaded += 1
         except Exception as e:
             err_msg = str(e)
+            if "Incorrect padding" in err_msg or "base64" in err_msg.lower():
+                err_msg = "Azure storage connection string may be corrupted or placeholder. Check AZURE_BLOB_CONNECTION_STRING (AccountKey must be valid base64)."
             if first_error is None:
                 first_error = err_msg
             logger.warning("upload: failed %s: %s", uf.filename or "file", e)

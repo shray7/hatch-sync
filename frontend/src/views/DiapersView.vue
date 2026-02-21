@@ -18,25 +18,12 @@
         :labels="diapersPerDay.labels"
         :data="diapersPerDay.values"
       />
-      <div class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70 p-4">
-        <div class="mb-2 text-sm font-medium text-slate-200">
-          Type breakdown (last 14 days)
-        </div>
-        <div class="flex flex-wrap gap-3 text-xs">
-          <div
-            v-for="row in typeBreakdown"
-            :key="row.type"
-            class="flex items-center gap-2 rounded-full border border-slate-700 px-3 py-1"
-          >
-            <span
-              class="inline-block h-2 w-2 rounded-full"
-              :class="row.colorClass"
-            ></span>
-            <span class="font-medium">{{ row.type }}</span>
-            <span class="text-slate-400">({{ row.count }})</span>
-          </div>
-        </div>
-      </div>
+      <ColumnChart
+        title="Type breakdown (last 14 days)"
+        :labels="typeBreakdownChart.labels"
+        :data="typeBreakdownChart.values"
+        :backgroundColor="typeBreakdownChart.colors"
+      />
     </section>
 
     <section v-if="loaded" class="rounded-xl border border-rose-950/20 border-slate-800 bg-slate-900/70">
@@ -82,6 +69,7 @@ import {
   lastNDaysKeysPST,
   toDate
 } from "../utils/pst";
+import ColumnChart from "../components/ColumnChart.vue";
 import TimeSeriesChart from "../components/TimeSeriesChart.vue";
 
 const raw = ref(null);
@@ -104,14 +92,16 @@ const diapersPerDay = computed(() => {
   };
 });
 
-const typeBreakdown = computed(() => {
-  if (!raw.value) return [];
+const typeBreakdownColors = {
+  Wet: "rgba(244, 114, 182, 0.8)",
+  Dirty: "rgba(252, 211, 77, 0.8)",
+  Both: "rgba(253, 164, 175, 0.8)"
+};
+
+const typeBreakdownChart = computed(() => {
+  if (!raw.value) return { labels: [], values: [], colors: [] };
   const keys = new Set(lastNDaysKeys(14));
-  const counts = {
-    Wet: 0,
-    Dirty: 0,
-    Both: 0
-  };
+  const counts = { Wet: 0, Dirty: 0, Both: 0 };
   raw.value.diapers.forEach((d) => {
     const k = dateKey(d.diaperDate || d.createDate);
     if (!keys.has(k)) return;
@@ -119,18 +109,12 @@ const typeBreakdown = computed(() => {
     if (!(t in counts)) counts[t] = 0;
     counts[t] += 1;
   });
-  const colors = {
-    Wet: "bg-pink-400",
-    Dirty: "bg-amber-300",
-    Both: "bg-rose-300"
+  const entries = Object.entries(counts).filter(([, c]) => c > 0);
+  return {
+    labels: entries.map(([t]) => t),
+    values: entries.map(([, c]) => c),
+    colors: entries.map(([t]) => typeBreakdownColors[t] || "rgba(148, 163, 184, 0.8)")
   };
-  return Object.entries(counts)
-    .filter(([, c]) => c > 0)
-    .map(([type, count]) => ({
-      type,
-      count,
-      colorClass: colors[type] || "bg-slate-400"
-    }));
 });
 
 const recentDiapers = computed(() => {
