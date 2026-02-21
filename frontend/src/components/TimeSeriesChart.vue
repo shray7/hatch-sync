@@ -37,7 +37,9 @@ const props = defineProps({
   labels: { type: Array, required: true },
   data: { type: Array, required: true },
   /** Moving average window (e.g. 3 or 7). When set, shows trend line. */
-  movingAverageWindow: { type: Number, default: 0 }
+  movingAverageWindow: { type: Number, default: 0 },
+  /** X-axis label rotation in degrees (e.g. 45 for diagonal). Default 0. */
+  xAxisRotation: { type: Number, default: 0 }
 });
 
 const canvasEl = ref(null);
@@ -118,7 +120,13 @@ const buildChart = () => {
       },
       scales: {
         x: {
-          ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }
+          ticks: {
+            color: "#9ca3af",
+            maxRotation: props.xAxisRotation,
+            minRotation: props.xAxisRotation,
+            autoSkip: true,
+            font: { size: 11 }
+          }
         },
         y: {
           ticks: { color: "#9ca3af" },
@@ -144,7 +152,7 @@ onMounted(() => {
 });
 
 watch(
-  () => [props.labels, props.data, props.movingAverageWindow],
+  () => [props.labels, props.data, props.movingAverageWindow, props.xAxisRotation],
   () => {
     const sig = dataSignature(props.labels, props.data, props.movingAverageWindow);
     if (sig === lastSig) return;

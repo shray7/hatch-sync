@@ -33,7 +33,9 @@ const props = defineProps({
   labels: { type: Array, required: true },
   data: { type: Array, required: true },
   // Optional array of colors per bar, or single color for all
-  backgroundColor: { type: [Array, String], default: "rgba(251, 113, 133, 0.8)" }
+  backgroundColor: { type: [Array, String], default: "rgba(251, 113, 133, 0.8)" },
+  /** Horizontal bar chart (labels on y-axis) for better readability with long labels */
+  horizontal: { type: Boolean, default: false }
 });
 
 const canvasEl = ref(null);
@@ -65,6 +67,7 @@ const buildChart = () => {
       ]
     },
     options: {
+      indexAxis: props.horizontal ? "y" : "x",
       responsive: true,
       maintainAspectRatio: false,
       layout: { padding: 0 },
@@ -77,10 +80,16 @@ const buildChart = () => {
       },
       scales: {
         x: {
-          ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true }
+          ticks: { color: "#9ca3af", maxRotation: 0, autoSkip: true },
+          grid: { color: "rgba(148, 163, 184, 0.2)" }
         },
         y: {
-          ticks: { color: "#9ca3af", stepSize: 1 },
+          ticks: {
+            color: "#9ca3af",
+            maxRotation: 0,
+            autoSkip: false,
+            font: { size: props.horizontal ? 12 : 10 }
+          },
           grid: { color: "rgba(148, 163, 184, 0.2)" }
         }
       }
@@ -107,7 +116,7 @@ onMounted(() => {
 });
 
 watch(
-  () => [props.labels, props.data, props.backgroundColor],
+  () => [props.labels, props.data, props.backgroundColor, props.horizontal],
   () => {
     const sig = dataSignature(props.labels, props.data);
     if (sig === lastSig) return;
