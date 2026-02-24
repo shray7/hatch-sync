@@ -5,7 +5,7 @@
         Daily Photos
       </h1>
       <p class="mt-1 text-sm text-slate-400">
-        Uma's daily photos from Hatch Grow.
+        Raya's daily photos from Hatch Grow.
         <span v-if="loaded && sortedPhotos.length > 0" class="text-rose-300/90">
           {{ sortedPhotos.length }} photo{{ sortedPhotos.length === 1 ? '' : 's' }}.
         </span>

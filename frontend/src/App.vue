@@ -17,7 +17,7 @@
               Hatch Grow Analytics
             </span>
             <span class="text-xs text-slate-400 leading-tight">
-              Uma's diapers, feedings, weight, photos & videos
+              Raya's diapers, feedings, weight, photos & videos
             </span>
           </div>
         </div>
